@@ -32,8 +32,27 @@ Things to do:
 #define STEP2 1
 #define STEP3 1
 
-vector<string> imageSet;
-vector<string> goodImages;
+//set of the images 
+list<ourImage> imageSet;
+//vector<string> goodImages;
+
+//Class for storing an image, the img mat, name, features etc go in a lsit of this type
+class ourImage {
+public:
+	string path;
+	string name;
+	Mat img;
+	Mat imgGrey;
+
+
+	ourImage( string path) {
+		this->path = path;
+		this->img = imread(path);
+		this->imgGrey = imread(path, IMREAD_GRAYSCALE);
+	}
+};
+
+
 
 
 
@@ -55,19 +74,23 @@ int main(int argc, char* argv[])
 		cout << "No image found";
 	}
 	//open all images in a folder
-	//string folderPath = "E:\\school\\ELEC474\\ELEC474-Exam\\takehome\\ELEC474_Assignment\\office2";
 	string folderPath = "office2";
-	
 	try {
 		for (const auto& entry : std::filesystem::directory_iterator(folderPath)) {
 			std::cout << entry.path() << std::endl;
+			imageSet.push_back(entry.path().string());//c++ is so weird, i just need to pass in the construtor params and not a new instance 
 		}
 	}
 	catch (const std::exception & e) { 
+		//probably couldnt find the folder
 		cout << e.what() << endl;
 	}
+	for (ourImage img1 : imageSet) {
+		//show the grayscale 
+		imshow(img1.path, img1.imgGrey);
+	}
 
-
+	waitKey();
 
 
 
