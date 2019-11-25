@@ -2,10 +2,15 @@
 //
 
 #include <iostream>
+#include <filesystem>
 #include <opencv2/opencv.hpp>
+#include <opencv2/core/core.hpp> // OpenCV Core Functionality
+#include <opencv2/highgui/highgui.hpp> // High-Level Graphical User Interface
+
 
 using namespace std;
 using namespace cv;
+
 
 /* ELEC474 Take home exam
 Things to do:
@@ -35,11 +40,37 @@ vector<string> goodImages;
 /* Function Protocols */
 void generateCompositeImage(vector<string> good); // Final output
 
-int main()
+int main(int argc, char* argv[])
 {
+
+	cout << "current program running from direcotry" << endl;
+	cout << filesystem::current_path() << endl;
+
+
 	Mat test = imread("20191119_152011.jpg");
+	if (!test.empty()) {
+		imshow("blah", test);
+	}
+	else {
+		cout << "No image found";
+	}
+	//open all images in a folder
+	//string folderPath = "E:\\school\\ELEC474\\ELEC474-Exam\\takehome\\ELEC474_Assignment\\office2";
+	string folderPath = "office2";
 	
-	imshow("blah", test);
+	try {
+		for (const auto& entry : std::filesystem::directory_iterator(folderPath)) {
+			std::cout << entry.path() << std::endl;
+		}
+	}
+	catch (const std::exception & e) { 
+		cout << e.what() << endl;
+	}
+
+
+
+
+
     std::cout << "Hello World!\n";
 	if (STEP3) {
 		generateCompositeImage(goodImages);
@@ -47,5 +78,5 @@ int main()
 }
 
 void generateCompositeImage(vector<string> good) {
-
+	return;
 }
