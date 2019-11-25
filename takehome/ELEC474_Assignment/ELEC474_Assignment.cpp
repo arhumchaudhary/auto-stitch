@@ -32,9 +32,8 @@ Things to do:
 #define STEP2 1
 #define STEP3 1
 
-//set of the images 
-list<ourImage> imageSet;
-//vector<string> goodImages;
+
+vector<string> goodImages;
 
 //Class for storing an image, the img mat, name, features etc go in a lsit of this type
 class ourImage {
@@ -48,10 +47,11 @@ public:
 	ourImage( string path) {
 		this->path = path;
 		this->img = imread(path);
-		this->imgGrey = imread(path, IMREAD_GRAYSCALE);
+		cvtColor(this->img, this->imgGrey, COLOR_RGB2GRAY);
 	}
 };
-
+//set of the images 
+list<ourImage> imageSet;
 
 
 
