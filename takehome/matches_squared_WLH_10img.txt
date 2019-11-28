@@ -1,0 +1,90 @@
+-Matches between img 0 and 1 -
+-- Match score : 3013.609000
+-Matches between img 0 and 2 -
+-- Match score : 3607.854000
+-Matches between img 0 and 3 -
+-- Match score : 3992.787000
+-Matches between img 0 and 4 -
+-- Match score : 3992.461000
+-Matches between img 0 and 5 -
+-- Match score : 4237.577000
+-Matches between img 0 and 6 -
+-- Match score : 4329.574000
+-Matches between img 0 and 7 -
+-- Match score : 4235.837000
+-Matches between img 0 and 8 -
+-- Match score : 4046.834000
+-Matches between img 0 and 9 -
+-- Match score : 4013.588000
+-Matches between img 1 and 2 -
+-- Match score : 2855.397000
+-Matches between img 1 and 3 -
+-- Match score : 3319.532000
+-Matches between img 1 and 4 -
+-- Match score : 3524.315000
+-Matches between img 1 and 5 -
+-- Match score : 3813.267000
+-Matches between img 1 and 6 -
+-- Match score : 3754.932000
+-Matches between img 1 and 7 -
+-- Match score : 3822.253000
+-Matches between img 1 and 8 -
+-- Match score : 3580.655000
+-Matches between img 1 and 9 -
+-- Match score : 3845.007000
+-Matches between img 2 and 3 -
+-- Match score : 1873.898000
+-Matches between img 2 and 4 -
+-- Match score : 2252.311000
+-Matches between img 2 and 5 -
+-- Match score : 3180.616000
+-Matches between img 2 and 6 -
+-- Match score : 3819.758000
+-Matches between img 2 and 7 -
+-- Match score : 4309.574000
+-Matches between img 2 and 8 -
+-- Match score : 4028.858000
+-Matches between img 2 and 9 -
+-- Match score : 4331.579000
+-Matches between img 3 and 4 -
+-- Match score : 1627.851000
+-Matches between img 3 and 5 -
+-- Match score : 2882.212000
+-Matches between img 3 and 6 -
+-- Match score : 3449.272000
+-Matches between img 3 and 7 -
+-- Match score : 3980.345000
+-Matches between img 3 and 8 -
+-- Match score : 3781.659000
+-Matches between img 3 and 9 -
+-- Match score : 3998.298000
+-Matches between img 4 and 5 -
+-- Match score : 3151.400000
+-Matches between img 4 and 6 -
+-- Match score : 3902.359000
+-Matches between img 4 and 7 -
+-- Match score : 4237.231000
+-Matches between img 4 and 8 -
+-- Match score : 4199.419000
+-Matches between img 4 and 9 -
+-- Match score : 4315.195000
+-Matches between img 5 and 6 -
+-- Match score : 3103.883000
+-Matches between img 5 and 7 -
+-- Match score : 4046.640000
+-Matches between img 5 and 8 -
+-- Match score : 4346.579000
+-Matches between img 5 and 9 -
+-- Match score : 4468.128000
+-Matches between img 6 and 7 -
+-- Match score : 3042.665000
+-Matches between img 6 and 8 -
+-- Match score : 4015.263000
+-Matches between img 6 and 9 -
+-- Match score : 4152.827000
+-Matches between img 7 and 8 -
+-- Match score : 4189.868000
+-Matches between img 7 and 9 -
+-- Match score : 4164.141000
+-Matches between img 8 and 9 -
+-- Match score : 3679.144000

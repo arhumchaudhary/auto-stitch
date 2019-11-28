@@ -46,7 +46,8 @@ using namespace cv;
 
 #define STEP1 1 //load images
 #define STEP2 1	//compute matches bwtween all
-#define STEP3 1 //perform stiching
+#define STEP3 0 //find optimal "path" to stich all  images 
+#define STEP4 0 //perform stiching
 
 #define RESCALE_ON_LOAD 0.5 // Rescaling the images for faster program
 #define UNDISTORT_ON_LOAD 1
@@ -60,11 +61,11 @@ using namespace cv;
 // Debug Flags
 #define IMAGE_LOADING_DEBUG 1  // Show loaded image (original)
 #define IMAGE_SMART_ADD_DEBUG 0 // Shows the masks of images 
-#define IMAGE_MATCHING_DEBUG 1 // Shows matched points, tranfomation matrixes, etc - nice
+#define IMAGE_MATCHING_DEBUG 0 // Shows matched points, tranfomation matrixes, etc - nice
 #define IMAGE_COMPOSITE_DEBUG 1
 // Avoiding loading the whole folder
 
-#define MAX_IMAGES_TO_LOAD 4 
+#define MAX_IMAGES_TO_LOAD 10 
 
 /* Global Variables */
 
@@ -74,7 +75,7 @@ using namespace cv;
 3 - StJames
 */
 
-#define FOLDER 2
+#define FOLDER 1
 string folderPath; // Global for folder path
 
 
@@ -162,6 +163,7 @@ public:
 vector<ourImage> imageSet;
 //indexes of the images in our composite allready
 vector<int> imagesInComposite;
+vector<int[2]> pathToassemble;
 
 //function 
 Mat PadImage(Mat&  img) {
@@ -354,15 +356,15 @@ void FindMatches(int img1indx, int img2indx) {
 		double dist = matches[i].distance;
 		if (dist < min_dist) min_dist = dist;
 		if (dist > max_dist) max_dist = dist;
-		matchScore += dist;
+		matchScore += (1+dist)*(1+dist);
 	}
 	//match score is the average of all the distances
 	matchScore = double(double(matchScore) / double(numOfPointsToGet));
 
 
 	printf("-Matches between img %d and %d -\n", img1indx, img2indx);
-	printf("-- Max dist : %f \n", max_dist);
-	printf("-- Min dist : %f \n", min_dist);
+	//printf("-- Max dist : %f \n", max_dist);
+	//printf("-- Min dist : %f \n", min_dist);
 	printf("-- Match score : %f \n", matchScore);
 
 	std::vector< DMatch > good_matches;
@@ -413,14 +415,19 @@ void FindMatches(int img1indx, int img2indx) {
 	imageSet[img2indx].goodMatchScores[img1indx] = matchScore;
 	
 	//find the transform
-	Mat homo = findHomography(transformPtsImg2, transformPtsImg1, RANSAC, 5.0);
+	Mat homo1 = findHomography(transformPtsImg2, transformPtsImg1, RANSAC, 5.0);
 	if (IMAGE_MATCHING_DEBUG) {
 		cout << "Transfomation Matrix" << endl;
-		cout << homo << endl;
+		cout << homo1 << endl;
+	}
+	Mat homo2 = findHomography(transformPtsImg1, transformPtsImg2, RANSAC, 5.0);
+	if (IMAGE_MATCHING_DEBUG) {
+		cout << "Transfomation Matrix" << endl;
+		cout << homo2 << endl;
 	}
 	//put in the dataset for later
-	imageSet[img1indx].homographyMatrixes[img2indx] = homo;
-	imageSet[img2indx].homographyMatrixes[img1indx] = homo;
+	imageSet[img1indx].homographyMatrixes[img2indx] = homo1;
+	imageSet[img2indx].homographyMatrixes[img1indx] = homo2;
 	
 
 
@@ -452,9 +459,10 @@ Mat composite2Images(Mat& composite, int img1indx, int img2indx) {
 	compositeImg = smartAddImg(img_1, warpedImg);
 	//addWeighted(img_1, 0.5, warpedImg, 0.5, 1, compositeImg);
 	//display
-	namedWindow("compositeIMG", WINDOW_NORMAL);
-	imshow("compositeIMG", compositeImg);
-	resizeWindow("compositeIMG", 800, 800);
+	string window = "composite Img using transform " + to_string(img1indx) + " and " + to_string(img2indx);
+	namedWindow(window, WINDOW_NORMAL);
+	imshow(window, compositeImg);
+	resizeWindow(window, 800, 800);
 
 	return compositeImg;
 }
@@ -501,15 +509,30 @@ int main(int argc, char* argv[]){
 			}
 		}
 	}
-
 	if (STEP3) {
-		Mat comp = imageSet[0].img;
-		comp = composite2Images(comp,0, 1);
-		comp = composite2Images(comp, 0, 2);
+		//pathToassemble.push_back({ 1,0 });
+		//pathToassemble.push_back({ 1,2 });
+	}
+
+
+
+
+	if (STEP4) {
+		Mat comp = imageSet[1].img;
+		imagesInComposite.push_back(1);
+		comp = composite2Images(comp,1, 0);
+		imagesInComposite.push_back(0);
+		comp = composite2Images(comp, 1, 2);
+		imagesInComposite.push_back(2);
 		//comp = composite2Images(comp, 0, 3);
-		namedWindow("Final Composite Image", WINDOW_NORMAL);
-		resizeWindow("Final Composite Image", 600, 600);
-		imshow("Final Composite Image", comp);
+
+		string window = "Final Composite Image of ";
+		for (int i = 0; i < imagesInComposite.size(); i++) {
+			window += imagesInComposite[i] + ",";
+		}
+		namedWindow(window, WINDOW_NORMAL);
+		resizeWindow(window, 600, 600);
+		imshow(window, comp);
 	}
 
 	////waitKey();
