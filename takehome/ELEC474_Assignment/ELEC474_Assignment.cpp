@@ -1,5 +1,34 @@
-// ELEC474_Assignment.cpp : This file contains the 'main' function. Program execution begins and ends there.
-//
+/*	ELEC474 Take Home Exam
+		Auto-Stitch
+	Brent Champion | 20066282
+	Nathaniel Pauze | 20066234
+	
+	COMMITS
+	1.	Started File solution (and didnt do it right apparently) - Brent
+	2.	Implements functinos to basically do whole program - Nat
+	3.	Implements some clean up, modifies main to allow easier toggling between
+		how many images to load and from which folder. Needs some work on the stitching
+		but overall it is producing an output th at looks good - Brent
+
+	Comments:
+	-	Need to add radiometric transformation things
+
+	-	OK so the software is basically picking an image and 
+		having that remain the background like 'flat' plane for
+		the entire stitching program. I think we should instead try to pick
+		the middle image and stitch to the left and stitch to the right instead
+		This will make it look more like a real stitched and will make it less 
+		like were crowding the right side. Thoughts?
+
+	-	Clean up the routines so that we're basically calling step1(), step2() 
+		and step3() in the main loop that iterates over all of the images in 
+		a folder. This way it is clear where the functions are relative to the 
+		instructions they gave us are. Thoughts?
+
+	-	Add toggle for matching images because every iteration of the pipeline 
+		overwrites the last one, would be better if it showed them all.
+
+*/
 
 #include <iostream>
 #include <filesystem>
@@ -12,29 +41,43 @@
 using namespace std;
 using namespace cv;
 
+/* Global Settings */
+
 #define STEP1 1
 #define STEP2 1
 #define STEP3 1
 
-//global setting flags 
-//rescales the images so things arnt slow as shit, set to 1 for no rescaling
-#define RESCALE_ON_LOAD 0.5
+#define RESCALE_ON_LOAD 0.5 // Rescaling the images for faster program
 #define UNDISTORT_ON_LOAD 1
 #define SMART_ADD_GAUSIAN_BLUR 101
-//JSUT BE SMART WITH THESE probly best ot leave at 2 for now
+
 #define PADDING_AMMOUNT 2
 #define PADDING_OFFSET 2
 
-//debug flags, toggles certain image diplay and logging 
-#define IMAGE_LOADING_DEBUG 1  //shows loaded images
-#define IMAGE_SMART_ADD_DEBUG 1 //shows masks and stuff
-#define IMAGE_MATCHING_DEBUG 1 //shows matched points, tranfomation matrixes, warped images, etc
+// Debug Flags
+#define IMAGE_LOADING_DEBUG 0  // Show loaded image (original)
+#define IMAGE_SMART_ADD_DEBUG 0 // Shows the masks of images 
+#define IMAGE_MATCHING_DEBUG 1 // Shows matched points, tranfomation matrixes, warped images, etc - nice
+#define IMAGE_COMPOSITE_DEBUG 1
+// Avoiding loading the whole folder
 
-//for debugging, so we dont need to load the whole folder
-#define MAX_IMAGES_TO_LOAD 3
+#define MAX_IMAGES_TO_LOAD 5
 
+/* Global Variables */
 
-vector<string> goodImages;
+/* Folder Path Settings
+1 - Office
+2 - WLH
+3 - StJames
+*/
+
+#define FOLDER 1
+string folderPath; // Global for folder path
+
+//string folderPath = "WLH";
+//string folderPath = "StJames";
+
+vector<string> goodImages; // Vector to hold the path of the good images
 
 //preps the global image info, this is done mostly with speclation 
 
@@ -45,17 +88,29 @@ vector<string> goodImages;
 //	return img;
 //}
 
+void setFolderPath() {
+	if (FOLDER == 1) {
+		folderPath = "office2";
+	}
+	else if (FOLDER == 2) {
+		folderPath = "WLH";
+	}
+	else if (FOLDER == 3) {
+		folderPath = "StJames";
+	}
+	else { cout << "Invalid FOLDER choice"; return; }
+}
 
 //Class for storing an image, the img mat, name, features etc go in a lsit of this type
 class ourImage {
 public:
-	string path;
-	string name;
+	string path; // File path
+	string name; // File name
 	Mat img;
 	Mat imgGrey;
 
 	//CONTRUCTOR
-	ourImage( string path) {
+	ourImage(string path) {
 		this->path = path;
 		//load the image, but center it with a black border half its size
 		Mat distorted = imread(path);
@@ -90,7 +145,8 @@ public:
 		cvtColor(this->img, this->imgGrey, COLOR_RGB2GRAY);
 	}
 };
-//set of the images 
+
+//set of the images - maybe we should look at implementing this as a priority queue giving them a score? or is it expected to put them all in order
 vector<ourImage> imageSet;
 
 //takes two images and adds them, img2 on top with some edge bluring 
@@ -154,8 +210,7 @@ Mat smartAddImg(Mat & img_1, Mat & img_2) {
 	return img_1 ;
 }
 
-
-//Composite 2 images by feature masking 
+// Composite 2 images by feature masking 
 Mat composite2Images(Mat& img_1, Mat& img_2) {
 	//intitate orb detector 
 	vector<KeyPoint> keypoints_1, keypoints_2;
@@ -262,18 +317,12 @@ Mat composite2Images(Mat& img_1, Mat& img_2) {
 	return compositeImg;
 }
 
-
-
-
-int main(int argc, char* argv[])
-{
+int main(int argc, char* argv[]){
 
 	cout << "current program running from direcotry" << endl;
 	cout << filesystem::current_path() << endl;
 
-	string folderPath = "office2";
-	//string folderPath = "WLH";
-	//string folderPath = "StJames";
+	setFolderPath();
 	cout << "opening " << MAX_IMAGES_TO_LOAD << " images from " << folderPath << " folder" << endl;
 	try {
 		int imagesLoaded = 0;
@@ -300,22 +349,23 @@ int main(int argc, char* argv[])
 	
 	//waitKey();
 	if (STEP2) {
-		Mat tempComp = composite2Images(imageSet[0].img, imageSet[1].img);
-		composite2Images(tempComp, imageSet.back().img);
+		Mat finalComposite;
+		Mat middleman = imageSet[0].img;
+		for (int i = 0; i < MAX_IMAGES_TO_LOAD - 1; i++) {
+			// Loop to basically continue updating the final composite image
+			finalComposite = composite2Images(middleman, imageSet[i + 1].img);
+			string windowTitle = "Composite #" + i;
+			if (IMAGE_COMPOSITE_DEBUG) {
+				namedWindow(windowTitle, WINDOW_NORMAL);
+				resizeWindow(windowTitle, 600, 600);
+				imshow(windowTitle, finalComposite);
+			}
+			middleman = finalComposite;
+
+		}
+		namedWindow("Final Composite Image", WINDOW_NORMAL);
+		resizeWindow("Final Composite Image", 600, 600);
+		imshow("Final Composite Image", finalComposite);
 	}
 	waitKey(0);
-
-
-
-
-
-
-    //std::cout << "Hello World!\n";
-	/*if (STEP3) {
-		generateCompositeImage(goodImages);
-	}*/
 }
-
-//void generateCompositeImage(vector<string> good) {
-//	return;
-//}
