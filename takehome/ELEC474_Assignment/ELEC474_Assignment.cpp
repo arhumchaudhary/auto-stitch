@@ -36,6 +36,7 @@
 #include <opencv2/core/core.hpp> // OpenCV Core Functionality
 #include <opencv2/highgui/highgui.hpp> // High-Level Graphical User Interface
 #include "opencv2/features2d.hpp" 
+//#include "opencv2/nonfree.hpp"
 
 
 using namespace std;
@@ -51,17 +52,19 @@ using namespace cv;
 #define UNDISTORT_ON_LOAD 1
 #define SMART_ADD_GAUSIAN_BLUR 101
 
+#define PIXEL_PADDING 600 //how many pixels should pad each image 
+
 #define PADDING_AMMOUNT 2
 #define PADDING_OFFSET 2
 
 // Debug Flags
-#define IMAGE_LOADING_DEBUG 0  // Show loaded image (original)
+#define IMAGE_LOADING_DEBUG 1  // Show loaded image (original)
 #define IMAGE_SMART_ADD_DEBUG 0 // Shows the masks of images 
 #define IMAGE_MATCHING_DEBUG 1 // Shows matched points, tranfomation matrixes, warped images, etc - nice
 #define IMAGE_COMPOSITE_DEBUG 1
 // Avoiding loading the whole folder
 
-#define MAX_IMAGES_TO_LOAD 5
+#define MAX_IMAGES_TO_LOAD 10
 
 /* Global Variables */
 
@@ -71,22 +74,24 @@ using namespace cv;
 3 - StJames
 */
 
-#define FOLDER 1
+#define FOLDER 2
 string folderPath; // Global for folder path
+
+
+
 
 //string folderPath = "WLH";
 //string folderPath = "StJames";
 
 vector<string> goodImages; // Vector to hold the path of the good images
 
-//preps the global image info, this is done mostly with speclation 
+Mat PadImage(Mat& img);
 
-//
-//Mat translateImg(Mat& img, int offsetx, int offsety) {
-//	Mat trans_mat = (Mat_<double>(2, 3) << 1, 0, offsetx, 0, 1, offsety);
-//	warpAffine(img, img, trans_mat, img.size());
-//	return img;
-//}
+Mat translateImg(Mat& img, Mat& target, int offsetx, int offsety) {
+	Mat trans_mat = (Mat_<double>(2, 3) << 1, 0, offsetx, 0, 1, offsety);
+	warpAffine(img, target, trans_mat, img.size());
+	return img;
+}
 
 void setFolderPath() {
 	if (FOLDER == 1) {
@@ -108,6 +113,7 @@ public:
 	string name; // File name
 	Mat img;
 	Mat imgGrey;
+	//vector<vector< DMatch >> goodMatches;
 
 	//CONTRUCTOR
 	ourImage(string path) {
@@ -137,10 +143,11 @@ public:
 			temp = distorted;
 		}
 		
-		// center it with a black border PADDING_AMMOUNT its size
-		this->img = Mat(temp.rows * PADDING_AMMOUNT, temp.cols * PADDING_AMMOUNT, temp.type());
-		Mat trans_mat = (Mat_<double>(2, 3) << 1, 0, temp.cols / PADDING_OFFSET, 0, 1, temp.rows / PADDING_OFFSET);
-		warpAffine(temp, this->img, trans_mat, this->img.size());
+		this->img = PadImage(temp);
+		//// center it with a black border PADDING_AMMOUNT its size
+		//this->img = Mat(temp.rows * PADDING_AMMOUNT, temp.cols * PADDING_AMMOUNT, temp.type());
+		//Mat trans_mat = (Mat_<double>(2, 3) << 1, 0, temp.cols / PADDING_OFFSET, 0, 1, temp.rows / PADDING_OFFSET);
+		//warpAffine(temp, this->img, trans_mat, this->img.size());
 		
 		cvtColor(this->img, this->imgGrey, COLOR_RGB2GRAY);
 	}
@@ -149,10 +156,101 @@ public:
 //set of the images - maybe we should look at implementing this as a priority queue giving them a score? or is it expected to put them all in order
 vector<ourImage> imageSet;
 
+
+//function 
+Mat PadImage(Mat&  img) {
+	int currentPaddingTop = 0;
+	int currentPaddingLeft = 0;
+	int currentPaddingBottom = 0;
+	int currentPaddingRight = 0;
+
+	//so aparently the only good way to break out of nested loops in c++ is goto, go figure
+
+
+	//start from top 
+	for (int r = 0; r < img.rows; r++) {
+		for (int c = 0; c < img.cols; c++) {
+			if (img.at<Vec3b>(r, c) != Vec3b(0, 0, 0)) {
+				currentPaddingTop = r;
+				goto leftCheck;
+			}
+		}
+	}
+	leftCheck:
+	//start from left 
+	for (int c = 0; c < img.cols; c++) {
+		for (int r = 0; r < img.rows; r++) {
+			if (img.at<Vec3b>(r, c) != Vec3b(0, 0, 0)) {
+				currentPaddingLeft = c;
+				goto bottomCheck;
+			}
+		}
+	}
+	bottomCheck:
+	//start from bottom
+	for (int r = img.rows-1; r >=0; r--) {
+		for (int c = 0; c < img.cols; c++) {
+			if (img.at<Vec3b>(r, c) != Vec3b(0, 0, 0)) {
+				currentPaddingBottom = img.rows - r -1;
+				goto rightCheck;
+			}
+		}
+	}
+	rightCheck:
+	//start from right
+	for (int c = img.cols - 1; c >= 0; c--) {
+		for (int r = 0; r < img.rows; r++) {
+			if (img.at<Vec3b>(r, c) != Vec3b(0, 0, 0)) {
+				currentPaddingRight = img.cols -c -1;
+				goto endOfChecks;
+			}
+		}
+	}
+	endOfChecks:
+
+
+	cout << "Image is " << img.rows << " rows by " << img.cols << " cols" << endl;
+	cout << "Top padding: " << currentPaddingTop << " Left padding: " << currentPaddingLeft << " Bottom padding: " << currentPaddingBottom << " Right padding: " << currentPaddingRight << endl;
+	
+
+	int paddingNeededTop = 0;
+	int paddingNeededLeft = 0;
+	int paddingNeededBottom = 0;
+	int paddingNeededRight = 0;
+	if (currentPaddingTop < PIXEL_PADDING) {
+		paddingNeededTop = PIXEL_PADDING - currentPaddingTop;
+	}
+	if (currentPaddingLeft < PIXEL_PADDING) {
+		paddingNeededLeft = PIXEL_PADDING - currentPaddingLeft;
+	}
+	if (currentPaddingBottom < PIXEL_PADDING) {
+		paddingNeededBottom = PIXEL_PADDING - currentPaddingBottom;
+	}
+	if (currentPaddingRight < PIXEL_PADDING) {
+		paddingNeededRight = PIXEL_PADDING - currentPaddingRight;
+	}
+	int offsetx = paddingNeededLeft;
+	int offsety = paddingNeededTop;
+
+	Mat newImage = Mat::zeros(img.rows + paddingNeededTop + paddingNeededBottom, img.cols + paddingNeededLeft + paddingNeededRight, CV_8U);
+
+	Mat trans_mat = (Mat_<double>(2, 3) << 1, 0, offsetx, 0, 1, offsety);
+	warpAffine(img, newImage, trans_mat, newImage.size());
+	cout << "new image dimensions " << newImage.rows << " rows by " << newImage.cols << " cols" << endl;
+	return newImage;
+
+}
+
+
+
+
+
+
 //takes two images and adds them, img2 on top with some edge bluring 
 Mat smartAddImg(Mat & img_1, Mat & img_2) {
 	//solid mask
 	Mat solidMask = Mat::zeros(img_2.rows, img_2.cols, CV_8U);
+	Mat erodedMask = Mat::zeros(img_2.rows, img_2.cols, CV_8U);
 	for (int r = 0; r < img_2.rows; r++) {
 		for (int c = 0; c < img_2.cols; c++) {
 			if (img_2.at<Vec3b>(r, c) != Vec3b(0, 0, 0)) {
@@ -166,6 +264,13 @@ Mat smartAddImg(Mat & img_1, Mat & img_2) {
 		Size(2 * erosion_size + 1, 2 * erosion_size + 1),
 		Point(erosion_size, erosion_size));
 	erode(solidMask, solidMask, element);
+	//erode again so blur is smother transition, ei edges of blur dont start at grey and not black
+	erosion_size = SMART_ADD_GAUSIAN_BLUR;
+	element = getStructuringElement(MORPH_RECT,
+		Size(2 * erosion_size + 1, 2 * erosion_size + 1),
+		Point(erosion_size, erosion_size));
+	erode(solidMask, erodedMask, element);
+
 
 	//diplay if debug flag
 	if (IMAGE_SMART_ADD_DEBUG) {
@@ -176,7 +281,7 @@ Mat smartAddImg(Mat & img_1, Mat & img_2) {
 	//Blur the mask for use in blending, wraped this in a try cause blurs can be finicky  
 	Mat bluredMask = Mat(img_2.rows, img_2.cols, CV_8U);
 	try {
-		GaussianBlur(solidMask, bluredMask, Size(SMART_ADD_GAUSIAN_BLUR, SMART_ADD_GAUSIAN_BLUR), 0, 0);
+		GaussianBlur(erodedMask, bluredMask, Size(SMART_ADD_GAUSIAN_BLUR, SMART_ADD_GAUSIAN_BLUR), 0, 0);
 		if (IMAGE_SMART_ADD_DEBUG) {
 			namedWindow("bluredMask", WINDOW_NORMAL);
 			imshow("bluredMask", bluredMask);
@@ -215,7 +320,9 @@ Mat composite2Images(Mat& img_1, Mat& img_2) {
 	//intitate orb detector 
 	vector<KeyPoint> keypoints_1, keypoints_2;
 	Mat descriptors_1, descriptors_2;
-	Ptr<FeatureDetector> detector = ORB::create();
+	//Ptr<SIFT> detector = cv::xfeatures2d::SIFT::create;
+	//Ptr<FeatureDetector> detector = ORB::create();
+	Ptr<FeatureDetector> detector = ORB::create(500,1.2,8,127,0,2,ORB::HARRIS_SCORE,127,20);
 	Ptr<DescriptorExtractor> descriptor = ORB::create();
 	Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
 
@@ -354,18 +461,22 @@ int main(int argc, char* argv[]){
 		for (int i = 0; i < MAX_IMAGES_TO_LOAD - 1; i++) {
 			// Loop to basically continue updating the final composite image
 			finalComposite = composite2Images(middleman, imageSet[i + 1].img);
-			string windowTitle = "Composite #" + i;
+			string windowTitle = "Composite #" + to_string(i);
 			if (IMAGE_COMPOSITE_DEBUG) {
 				namedWindow(windowTitle, WINDOW_NORMAL);
 				resizeWindow(windowTitle, 600, 600);
 				imshow(windowTitle, finalComposite);
 			}
-			middleman = finalComposite;
+			//middleman = finalComposite;
+			middleman = PadImage(finalComposite);
 
 		}
+
+		
 		namedWindow("Final Composite Image", WINDOW_NORMAL);
 		resizeWindow("Final Composite Image", 600, 600);
-		imshow("Final Composite Image", finalComposite);
+		imshow("Final Composite Image", middleman);
+		//PadImage(finalComposite);
 	}
 	waitKey(0);
 }
