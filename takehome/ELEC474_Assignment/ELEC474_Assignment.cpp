@@ -44,9 +44,9 @@ using namespace cv;
 
 /* Global Settings */
 
-#define STEP1 1
-#define STEP2 1
-#define STEP3 1
+#define STEP1 1 //load images
+#define STEP2 1	//compute matches bwtween all
+#define STEP3 1 //perform stiching
 
 #define RESCALE_ON_LOAD 0.5 // Rescaling the images for faster program
 #define UNDISTORT_ON_LOAD 1
@@ -60,11 +60,11 @@ using namespace cv;
 // Debug Flags
 #define IMAGE_LOADING_DEBUG 1  // Show loaded image (original)
 #define IMAGE_SMART_ADD_DEBUG 0 // Shows the masks of images 
-#define IMAGE_MATCHING_DEBUG 1 // Shows matched points, tranfomation matrixes, warped images, etc - nice
+#define IMAGE_MATCHING_DEBUG 1 // Shows matched points, tranfomation matrixes, etc - nice
 #define IMAGE_COMPOSITE_DEBUG 1
 // Avoiding loading the whole folder
 
-#define MAX_IMAGES_TO_LOAD 10
+#define MAX_IMAGES_TO_LOAD 4 
 
 /* Global Variables */
 
@@ -113,10 +113,15 @@ public:
 	string name; // File name
 	Mat img;
 	Mat imgGrey;
-	//vector<vector< DMatch >> goodMatches;
-
+	vector<vector<DMatch>> goodMatches;
+	vector<double> goodMatchScores;
+	vector<Mat> homographyMatrixes;
 	//CONTRUCTOR
 	ourImage(string path) {
+		goodMatches.resize(MAX_IMAGES_TO_LOAD);
+		goodMatchScores.resize(MAX_IMAGES_TO_LOAD);
+		homographyMatrixes.resize(MAX_IMAGES_TO_LOAD);
+
 		this->path = path;
 		//load the image, but center it with a black border half its size
 		Mat distorted = imread(path);
@@ -153,9 +158,10 @@ public:
 	}
 };
 
-//set of the images - maybe we should look at implementing this as a priority queue giving them a score? or is it expected to put them all in order
+//set of the images
 vector<ourImage> imageSet;
-
+//indexes of the images in our composite allready
+vector<int> imagesInComposite;
 
 //function 
 Mat PadImage(Mat&  img) {
@@ -242,10 +248,6 @@ Mat PadImage(Mat&  img) {
 }
 
 
-
-
-
-
 //takes two images and adds them, img2 on top with some edge bluring 
 Mat smartAddImg(Mat & img_1, Mat & img_2) {
 	//solid mask
@@ -315,14 +317,18 @@ Mat smartAddImg(Mat & img_1, Mat & img_2) {
 	return img_1 ;
 }
 
-// Composite 2 images by feature masking 
-Mat composite2Images(Mat& img_1, Mat& img_2) {
+//compute best mathces between 2 images using the indexes in image set, find transform too
+void FindMatches(int img1indx, int img2indx) {
+	Mat& img_1 = imageSet[img1indx].img;
+	Mat& img_2 = imageSet[img2indx].img;
+	const int numOfPointsToGet =1000; //interestingly this has a minor effect on processign time.... weird
+	double matchScore = 0;
 	//intitate orb detector 
 	vector<KeyPoint> keypoints_1, keypoints_2;
 	Mat descriptors_1, descriptors_2;
 	//Ptr<SIFT> detector = cv::xfeatures2d::SIFT::create;
 	//Ptr<FeatureDetector> detector = ORB::create();
-	Ptr<FeatureDetector> detector = ORB::create(500,1.2,8,127,0,2,ORB::HARRIS_SCORE,127,20);
+	Ptr<FeatureDetector> detector = ORB::create(numOfPointsToGet, 1.2, 8, 127, 0, 2, ORB::HARRIS_SCORE, 127, 20);
 	Ptr<DescriptorExtractor> descriptor = ORB::create();
 	Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
 
@@ -333,13 +339,14 @@ Mat composite2Images(Mat& img_1, Mat& img_2) {
 	descriptor->compute(img_2, keypoints_2, descriptors_2);
 
 	//draw keypoints
-	Mat outimg1;
-	drawKeypoints(img_1, keypoints_1, outimg1, Scalar::all(-1), DrawMatchesFlags::DEFAULT);
+	//Mat outimg1;
+	//drawKeypoints(img_1, keypoints_1, outimg1, Scalar::all(-1), DrawMatchesFlags::DEFAULT);
 
 	vector<DMatch> matches;
 	//BFMatcher matcher ( NORM_HAMMING );
 	matcher->match(descriptors_1, descriptors_2, matches);
 	double min_dist = 10000, max_dist = 0;
+
 
 	//Find the minimum and maximum distances between mathces, so the most similar and the least similar 
 	for (int i = 0; i < descriptors_1.rows; i++)
@@ -347,10 +354,16 @@ Mat composite2Images(Mat& img_1, Mat& img_2) {
 		double dist = matches[i].distance;
 		if (dist < min_dist) min_dist = dist;
 		if (dist > max_dist) max_dist = dist;
+		matchScore += dist;
 	}
+	//match score is the average of all the distances
+	matchScore = double(double(matchScore) / double(numOfPointsToGet));
 
+
+	printf("-Matches between img %d and %d -\n", img1indx, img2indx);
 	printf("-- Max dist : %f \n", max_dist);
 	printf("-- Min dist : %f \n", min_dist);
+	printf("-- Match score : %f \n", matchScore);
 
 	std::vector< DMatch > good_matches;
 	//When the distance between the descriptors is 
@@ -363,21 +376,21 @@ Mat composite2Images(Mat& img_1, Mat& img_2) {
 			good_matches.push_back(matches[i]);
 		}
 	}
-	Mat img_match;
+	
 	Mat img_goodmatch;
 	//-- Draw results 
 	if (IMAGE_MATCHING_DEBUG) {
-		
-		drawMatches(img_1, keypoints_1, img_2, keypoints_2, matches, img_match);
-		drawMatches(img_1, keypoints_1, img_2, keypoints_2, good_matches, img_goodmatch);
-		namedWindow("matches", WINDOW_NORMAL);
-		imshow("matches", img_match);
-		resizeWindow("matches", 600, 600);
-		namedWindow("goodmatches", WINDOW_NORMAL);
-		imshow("goodmatches", img_goodmatch);
-		resizeWindow("goodmatches", 800, 800);
-	}
 
+		//drawMatches(img_1, keypoints_1, img_2, keypoints_2, matches, img_match);
+		drawMatches(img_1, keypoints_1, img_2, keypoints_2, good_matches, img_goodmatch);
+		//namedWindow("matches", WINDOW_NORMAL);
+		//imshow("matches", img_match);
+		//resizeWindow("matches", 600, 600);
+		string window = "good matches between " + to_string(img1indx) + " and " + to_string(img2indx);
+		namedWindow(window, WINDOW_NORMAL);
+		imshow(window, img_goodmatch);
+		resizeWindow(window, 800, 800);
+	}
 	//estimate affine transfomation 
 	//get points to use 
 	if (IMAGE_MATCHING_DEBUG) {
@@ -386,20 +399,42 @@ Mat composite2Images(Mat& img_1, Mat& img_2) {
 	vector<Point2d> transformPtsImg1;
 	vector<Point2d> transformPtsImg2;
 	//get the good points, take top 30
-	for (int i = 0; (i < good_matches.size() && i < 30); i++) {
+	for (int i = 0; (i < good_matches.size() && i < 60); i++) {
 		transformPtsImg1.push_back(keypoints_1[good_matches[i].queryIdx].pt);
 		transformPtsImg2.push_back(keypoints_2[good_matches[i].trainIdx].pt);
 		if (IMAGE_MATCHING_DEBUG) {
-			cout << transformPtsImg1[i] << " -> " << transformPtsImg2[i] << endl;
+			//cout << transformPtsImg1[i] << " -> " << transformPtsImg2[i] << endl;
 		}
-
 	}
-	//calcualte transfomation matrix
+	//put the good points and the score of all points in the image set data
+	imageSet[img1indx].goodMatches[img2indx] = good_matches;
+	imageSet[img1indx].goodMatchScores[img2indx] = matchScore;
+	imageSet[img2indx].goodMatches[img1indx] = good_matches;
+	imageSet[img2indx].goodMatchScores[img1indx] = matchScore;
+	
+	//find the transform
 	Mat homo = findHomography(transformPtsImg2, transformPtsImg1, RANSAC, 5.0);
 	if (IMAGE_MATCHING_DEBUG) {
 		cout << "Transfomation Matrix" << endl;
 		cout << homo << endl;
 	}
+	//put in the dataset for later
+	imageSet[img1indx].homographyMatrixes[img2indx] = homo;
+	imageSet[img2indx].homographyMatrixes[img1indx] = homo;
+	
+
+
+}
+
+
+
+
+// Composite 2 images by feature masking 
+Mat composite2Images(Mat& composite, int img1indx, int img2indx) {
+	//Mat& img_1 = imageSet[img1indx].img;
+	Mat& img_1 = composite;
+	Mat& img_2 = imageSet[img2indx].img;
+	Mat homo = imageSet[img1indx].homographyMatrixes[img2indx];
 
 	//apply transformation to image 
 	Mat warpedImg = Mat(img_2.rows, img_2.cols, img_2.type());
@@ -453,30 +488,53 @@ int main(int argc, char* argv[]){
 			resizeWindow(img.path, 600, 600);
 		}
 	}
-	
-	//waitKey();
+	//claculate all matchign points and transfomrs and store that 
 	if (STEP2) {
-		Mat finalComposite;
-		Mat middleman = imageSet[0].img;
-		for (int i = 0; i < MAX_IMAGES_TO_LOAD - 1; i++) {
-			// Loop to basically continue updating the final composite image
-			finalComposite = composite2Images(middleman, imageSet[i + 1].img);
-			string windowTitle = "Composite #" + to_string(i);
-			if (IMAGE_COMPOSITE_DEBUG) {
-				namedWindow(windowTitle, WINDOW_NORMAL);
-				resizeWindow(windowTitle, 600, 600);
-				imshow(windowTitle, finalComposite);
+		for (int i = 0; i < MAX_IMAGES_TO_LOAD ; i++) {
+			for (int j = 0; j < MAX_IMAGES_TO_LOAD ; j++) {
+				if (j != i) {
+					//if this is 0 we havent checked this pair yet
+					if (imageSet[i].goodMatchScores[j] == 0) {
+						FindMatches(i, j);
+					}
+				}
 			}
-			//middleman = finalComposite;
-			middleman = PadImage(finalComposite);
-
 		}
+	}
 
-		
+	if (STEP3) {
+		Mat comp = imageSet[0].img;
+		comp = composite2Images(comp,0, 1);
+		comp = composite2Images(comp, 0, 2);
+		//comp = composite2Images(comp, 0, 3);
 		namedWindow("Final Composite Image", WINDOW_NORMAL);
 		resizeWindow("Final Composite Image", 600, 600);
-		imshow("Final Composite Image", middleman);
-		//PadImage(finalComposite);
+		imshow("Final Composite Image", comp);
 	}
+
+	////waitKey();
+	//if (STEP3) {
+	//	Mat& img_1;
+	//	Mat middleman = imageSet[0].img;
+	//	for (int i = 0; i < MAX_IMAGES_TO_LOAD - 1; i++) {
+	//		// Loop to basically continue updating the final composite image
+	//		finalComposite = composite2Images(middleman, imageSet[i + 1].img);
+	//		string windowTitle = "Composite #" + to_string(i);
+	//		if (IMAGE_COMPOSITE_DEBUG) {
+	//			namedWindow(windowTitle, WINDOW_NORMAL);
+	//			resizeWindow(windowTitle, 600, 600);
+	//			imshow(windowTitle, finalComposite);
+	//		}
+	//		//middleman = finalComposite;
+	//		middleman = PadImage(finalComposite);
+
+	//	}
+
+	//	
+	//	namedWindow("Final Composite Image", WINDOW_NORMAL);
+	//	resizeWindow("Final Composite Image", 600, 600);
+	//	imshow("Final Composite Image", middleman);
+	//	//PadImage(finalComposite);
+	//}
 	waitKey(0);
 }
