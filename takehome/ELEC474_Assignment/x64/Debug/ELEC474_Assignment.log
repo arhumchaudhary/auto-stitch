@@ -1,3 +1,3 @@
 ﻿  ELEC474_Assignment.cpp
-E:\school\ELEC474\ELEC474-Exam\takehome\ELEC474_Assignment\ELEC474_Assignment.cpp(333,109): warning C4305: 'argument': truncation from 'double' to 'float'
-  ELEC474_Assignment.vcxproj -> E:\school\ELEC474\ELEC474-Exam\takehome\ELEC474_Assignment\x64\Debug\ELEC474_Assignment.exe
+C:\Users\brent\Desktop\ELEC474-Exam\takehome\ELEC474_Assignment\ELEC474_Assignment.cpp(431,109): warning C4305: 'argument': truncation from 'double' to 'float'
+  ELEC474_Assignment.vcxproj -> C:\Users\brent\Desktop\ELEC474-Exam\takehome\ELEC474_Assignment\x64\Debug\ELEC474_Assignment.exe

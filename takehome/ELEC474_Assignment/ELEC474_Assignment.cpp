@@ -9,24 +9,8 @@
 	3.	Implements some clean up, modifies main to allow easier toggling between
 		how many images to load and from which folder. Needs some work on the stitching
 		but overall it is producing an output th at looks good - Brent
-
-	Comments:
-	-	Need to add radiometric transformation things
-
-	-	OK so the software is basically picking an image and 
-		having that remain the background like 'flat' plane for
-		the entire stitching program. I think we should instead try to pick
-		the middle image and stitch to the left and stitch to the right instead
-		This will make it look more like a real stitched and will make it less 
-		like were crowding the right side. Thoughts?
-
-	-	Clean up the routines so that we're basically calling step1(), step2() 
-		and step3() in the main loop that iterates over all of the images in 
-		a folder. This way it is clear where the functions are relative to the 
-		instructions they gave us are. Thoughts?
-
-	-	Add toggle for matching images because every iteration of the pipeline 
-		overwrites the last one, would be better if it showed them all.
+	4.	Nat implements better structuring and toggles for program. Also gets it to work better by adding padding 
+	5.	Brent implements some refactoring and got about half the report done
 
 */
 
@@ -36,38 +20,38 @@
 #include <opencv2/core/core.hpp> // OpenCV Core Functionality
 #include <opencv2/highgui/highgui.hpp> // High-Level Graphical User Interface
 #include "opencv2/features2d.hpp" 
-//#include "opencv2/nonfree.hpp"
-
 
 using namespace std;
 using namespace cv;
 
-/* Global Settings */
+/* ------------------------------ Global Settings ------------------------------ */
 
-#define STEP1 1 //load images
-#define STEP2 1	//compute matches bwtween all
-#define STEP3 0 //find optimal "path" to stich all  images 
-#define STEP4 0 //perform stiching
+#define STEP1					1 //load images
+#define STEP2					1	//compute matches bwtween all
+#define STEP3					0 //find optimal "path" to stich all  images 
+#define STEP4					0 //perform stiching
+#define SAVE_OUTPUT				1
 
-#define RESCALE_ON_LOAD 0.5 // Rescaling the images for faster program
-#define UNDISTORT_ON_LOAD 1
-#define SMART_ADD_GAUSIAN_BLUR 101
+#define RESCALE_ON_LOAD			0.5 // Rescaling the images for faster program
+#define UNDISTORT_ON_LOAD		1
+#define SMART_ADD_GAUSIAN_BLUR	101
 
-#define PIXEL_PADDING 600 //how many pixels should pad each image 
-
-#define PADDING_AMMOUNT 2
-#define PADDING_OFFSET 2
+#define PIXEL_PADDING			600 //how many pixels should pad each image 
+#define PADDING_AMMOUNT			2
+#define PADDING_OFFSET			2
 
 // Debug Flags
-#define IMAGE_LOADING_DEBUG 1  // Show loaded image (original)
-#define IMAGE_SMART_ADD_DEBUG 0 // Shows the masks of images 
-#define IMAGE_MATCHING_DEBUG 0 // Shows matched points, tranfomation matrixes, etc - nice
-#define IMAGE_COMPOSITE_DEBUG 1
-// Avoiding loading the whole folder
+#define IMAGE_LOADING_DEBUG		0 // Show loaded image (original)
+#define IMAGE_SMART_ADD_DEBUG	0 // Shows the masks of images 
+#define IMAGE_MATCHING_DEBUG	0 // Shows matched points, tranfomation matrixes, etc - nice
+#define IMAGE_COMPOSITE_DEBUG	0 // Shows each step of the composition of the final image
+#define PRINT_CONSOLE_DEBUG		0 // Printing general info in console 
+#define PRINT_CAMERA_DEBUG		0 // Printing 
 
-#define MAX_IMAGES_TO_LOAD 10 
+#define FOLDER					1
+#define MAX_IMAGES_TO_LOAD		10 
 
-/* Global Variables */
+/* ------------------------------ Global Variables ------------------------------ */
 
 /* Folder Path Settings
 1 - Office
@@ -75,19 +59,192 @@ using namespace cv;
 3 - StJames
 */
 
-#define FOLDER 1
 string folderPath; // Global for folder path
 
+/* ------------------------------ Function Protocols ------------------------------ */
+/* want to play around with this -> we should have our functions follow an easy to follow pipeline
+something like
+1. setFolderPath()
+2. initSubImages()
+3. matchingProcess()
+	3.1 -> more detail into subprocesses if any?
+4. getTransformations();
+5. buildCompositeImage();
+*/
+Mat translateImg(Mat& img, Mat& target, int offsetx, int offsety);
+void setFolderPath();
+Mat addImagePadding(Mat& img);
+void FindMatches(int img1indx, int img2indx);
+Mat smartAddImg(Mat& img_1, Mat& img_2);
+Mat composite2Images(Mat& composite, int img1indx, int img2indx);
+
+/* ------------------------------ Global Data Structures ------------------------------ */
+
+class subImage {
+	public:
+		string path; // File path
+		string name; // File name
+		Mat img; // Image source
+		Mat imgGrey; // Gray Image
+		vector<vector<DMatch>> goodMatches; // Matrix of all of the matches -> Consider implementing a priority queue? or another structure to basically filter out bad matches
+		vector<double> goodMatchScores; // List of all the goodMatchScores
+		vector<Mat> homographyMatrixes; // List of all the homographies to other mats
+	
+		// subImage Constructor
+		subImage(string path) {
+			goodMatches.resize(MAX_IMAGES_TO_LOAD);
+			goodMatchScores.resize(MAX_IMAGES_TO_LOAD);
+			homographyMatrixes.resize(MAX_IMAGES_TO_LOAD);
+
+			this->path = path;
+			//load the image, but center it with a black border half its size
+			Mat distorted = imread(path);
+			Mat temp = Mat(distorted.rows, distorted.cols, distorted.type());
+			//rescale if specified
+			if (RESCALE_ON_LOAD != 1) {
+				resize(distorted, distorted, Size(), RESCALE_ON_LOAD, RESCALE_ON_LOAD);
+			}
 
 
+			//undistort it if option set
+			if (UNDISTORT_ON_LOAD) {
+				Mat intrinsic = (Mat_<double>(3, 3) << 600, 0, distorted.cols / 2, 0, 600, distorted.rows / 2, 0, 0, 1);//camera matrix
+				Mat distortionCoef = (Mat_<double>(1, 5) << 0.2, 0.05, 0.00, 0, 0); //radial blur coefs
+				Mat camMatrix = getOptimalNewCameraMatrix(intrinsic, distortionCoef, distorted.size(), 0);//make the actual transforma matrix 
+				if (IMAGE_LOADING_DEBUG) {
+					cout << "Cam matrix" << endl;
+					cout << camMatrix << endl;
+				}
+				temp = Mat(distorted.rows, distorted.cols, distorted.type());
+				undistort(distorted, temp, camMatrix, distortionCoef);
+			}
+			else {
+				temp = distorted;
+			}
 
-//string folderPath = "WLH";
-//string folderPath = "StJames";
+			this->img = addImagePadding(temp);
+			//// center it with a black border PADDING_AMMOUNT its size
+			//this->img = Mat(temp.rows * PADDING_AMMOUNT, temp.cols * PADDING_AMMOUNT, temp.type());
+			//Mat trans_mat = (Mat_<double>(2, 3) << 1, 0, temp.cols / PADDING_OFFSET, 0, 1, temp.rows / PADDING_OFFSET);
+			//warpAffine(temp, this->img, trans_mat, this->img.size());
 
-vector<string> goodImages; // Vector to hold the path of the good images
+			cvtColor(this->img, this->imgGrey, COLOR_RGB2GRAY);
+		}
+}; // Class storing details regarding an image
 
-Mat PadImage(Mat& img);
+vector<subImage> imageSet; // Initialize a vector of all of the subImages -> to be combined into the 'super' image
 
+//indexes of the images in our composite allready
+vector<int> imagesInComposite; // could be defined in main?
+vector<int[2]> pathToassemble; // Nice
+
+/* --------------------------------- Main Routine ------------------------------------- */
+int main(int argc, char* argv[]) {
+	setFolderPath(); // Set the folder based for testing
+	if (PRINT_CONSOLE_DEBUG) { // Initial steps
+		cout << "current program running from direcotry" << endl;
+		cout << filesystem::current_path() << endl;
+		cout << "opening " << MAX_IMAGES_TO_LOAD << " images from " << folderPath << " folder" << endl;
+	}
+	try { 
+		int imagesLoaded = 0;
+		for (const auto& entry : std::filesystem::directory_iterator(folderPath)) {
+			if (imagesLoaded < MAX_IMAGES_TO_LOAD) {
+				cout << entry.path() << std::endl;
+				imageSet.push_back(entry.path().string());//c++ is so weird, i just need to pass in the construtor params and not a new instance 
+				imagesLoaded++;
+			}
+		}
+	} catch (const std::exception & e) {
+		//probably couldnt find the folder
+		cout << e.what() << endl;
+	}
+	
+	if (IMAGE_LOADING_DEBUG) { // Show the original images
+		for (subImage img : imageSet) {
+			namedWindow(img.path, WINDOW_NORMAL);
+			imshow(img.path, img.img);
+			resizeWindow(img.path, 600, 600);
+		}
+	}
+
+	if (STEP1) {
+		// Write modular matching algorithm here -> have it work with the data structure we defined
+	}
+
+	if (STEP2) {
+		// Method to filter through the match metric score in step 1, find transformations
+		for (int i = 0; i < MAX_IMAGES_TO_LOAD; i++) {
+			for (int j = 0; j < MAX_IMAGES_TO_LOAD; j++) {
+				if (j != i) {
+					//if this is 0 we havent checked this pair yet
+					if (imageSet[i].goodMatchScores[j] == 0) {
+						FindMatches(i, j); 
+					}
+				}
+			}
+		}
+	}
+	
+	if (STEP3) {
+		// I think that this should be the generating composite image section
+		//pathToassemble.push_back({ 1,0 });
+		//pathToassemble.push_back({ 1,2 });
+			////waitKey();
+	//if (STEP3) {
+	//	Mat& img_1;
+	//	Mat middleman = imageSet[0].img;
+	//	for (int i = 0; i < MAX_IMAGES_TO_LOAD - 1; i++) {
+	//		// Loop to basically continue updating the final composite image
+	//		finalComposite = composite2Images(middleman, imageSet[i + 1].img);
+	//		string windowTitle = "Composite #" + to_string(i);
+	//		if (IMAGE_COMPOSITE_DEBUG) {
+	//			namedWindow(windowTitle, WINDOW_NORMAL);
+	//			resizeWindow(windowTitle, 600, 600);
+	//			imshow(windowTitle, finalComposite);
+	//		}
+	//		//middleman = finalComposite;
+	//		middleman = PadImage(finalComposite);
+
+	//	}
+
+	//	
+	//	namedWindow("Final Composite Image", WINDOW_NORMAL);
+	//	resizeWindow("Final Composite Image", 600, 600);
+	//	imshow("Final Composite Image", middleman);
+	//	//PadImage(finalComposite);
+	//}
+
+	}
+
+	if (STEP4) {
+		cout << "Beginning step 4" << endl;
+		Mat comp = imageSet[1].img;
+		imagesInComposite.push_back(1);
+		comp = composite2Images(comp, 1, 0);
+		imagesInComposite.push_back(0);
+		comp = composite2Images(comp, 1, 2);
+		imagesInComposite.push_back(2);
+		//comp = composite2Images(comp, 0, 3);
+
+		string window = "Final Composite Image of ";
+		for (int i = 0; i < imagesInComposite.size(); i++) {
+			window += imagesInComposite[i] + ",";
+		}
+		namedWindow(window, WINDOW_NORMAL);
+		resizeWindow(window, 600, 600);
+		imshow(window, comp);
+	}
+
+	if (SAVE_OUTPUT) {
+
+	}
+
+	waitKey(0);
+}
+
+
+/* ----------------------------- Function Implementations ------------------------------*/
 Mat translateImg(Mat& img, Mat& target, int offsetx, int offsety) {
 	Mat trans_mat = (Mat_<double>(2, 3) << 1, 0, offsetx, 0, 1, offsety);
 	warpAffine(img, target, trans_mat, img.size());
@@ -107,66 +264,8 @@ void setFolderPath() {
 	else { cout << "Invalid FOLDER choice"; return; }
 }
 
-//Class for storing an image, the img mat, name, features etc go in a lsit of this type
-class ourImage {
-public:
-	string path; // File path
-	string name; // File name
-	Mat img;
-	Mat imgGrey;
-	vector<vector<DMatch>> goodMatches;
-	vector<double> goodMatchScores;
-	vector<Mat> homographyMatrixes;
-	//CONTRUCTOR
-	ourImage(string path) {
-		goodMatches.resize(MAX_IMAGES_TO_LOAD);
-		goodMatchScores.resize(MAX_IMAGES_TO_LOAD);
-		homographyMatrixes.resize(MAX_IMAGES_TO_LOAD);
-
-		this->path = path;
-		//load the image, but center it with a black border half its size
-		Mat distorted = imread(path);
-		Mat temp = Mat(distorted.rows, distorted.cols, distorted.type());
-		//rescale if specified
-		if (RESCALE_ON_LOAD != 1) {
-			resize(distorted, distorted, Size(), RESCALE_ON_LOAD, RESCALE_ON_LOAD);
-		}
-
-
-		//undistort it if option set
-		if (UNDISTORT_ON_LOAD) {
-			Mat intrinsic = (Mat_<double>(3, 3) << 600, 0, distorted.cols / 2, 0, 600, distorted.rows / 2, 0, 0, 1);//camera matrix
-			Mat distortionCoef = (Mat_<double>(1, 5) << 0.2, 0.05, 0.00, 0, 0); //radial blur coefs
-			Mat camMatrix = getOptimalNewCameraMatrix(intrinsic, distortionCoef, distorted.size(), 0);//make the actual transforma matrix 
-			if (IMAGE_LOADING_DEBUG) {
-				cout << "Cam matrix" << endl;
-				cout << camMatrix << endl;
-			}
-			temp = Mat(distorted.rows, distorted.cols, distorted.type());
-			undistort(distorted, temp, camMatrix, distortionCoef);
-		}
-		else {
-			temp = distorted;
-		}
-		
-		this->img = PadImage(temp);
-		//// center it with a black border PADDING_AMMOUNT its size
-		//this->img = Mat(temp.rows * PADDING_AMMOUNT, temp.cols * PADDING_AMMOUNT, temp.type());
-		//Mat trans_mat = (Mat_<double>(2, 3) << 1, 0, temp.cols / PADDING_OFFSET, 0, 1, temp.rows / PADDING_OFFSET);
-		//warpAffine(temp, this->img, trans_mat, this->img.size());
-		
-		cvtColor(this->img, this->imgGrey, COLOR_RGB2GRAY);
-	}
-};
-
-//set of the images
-vector<ourImage> imageSet;
-//indexes of the images in our composite allready
-vector<int> imagesInComposite;
-vector<int[2]> pathToassemble;
-
 //function 
-Mat PadImage(Mat&  img) {
+Mat addImagePadding(Mat&  img) {
 	int currentPaddingTop = 0;
 	int currentPaddingLeft = 0;
 	int currentPaddingBottom = 0;
@@ -248,7 +347,6 @@ Mat PadImage(Mat&  img) {
 	return newImage;
 
 }
-
 
 //takes two images and adds them, img2 on top with some edge bluring 
 Mat smartAddImg(Mat & img_1, Mat & img_2) {
@@ -433,9 +531,6 @@ void FindMatches(int img1indx, int img2indx) {
 
 }
 
-
-
-
 // Composite 2 images by feature masking 
 Mat composite2Images(Mat& composite, int img1indx, int img2indx) {
 	//Mat& img_1 = imageSet[img1indx].img;
@@ -467,97 +562,4 @@ Mat composite2Images(Mat& composite, int img1indx, int img2indx) {
 	return compositeImg;
 }
 
-int main(int argc, char* argv[]){
 
-	cout << "current program running from direcotry" << endl;
-	cout << filesystem::current_path() << endl;
-
-	setFolderPath();
-	cout << "opening " << MAX_IMAGES_TO_LOAD << " images from " << folderPath << " folder" << endl;
-	try {
-		int imagesLoaded = 0;
-		for (const auto& entry : std::filesystem::directory_iterator(folderPath)) {
-			if (imagesLoaded < MAX_IMAGES_TO_LOAD){
-				cout << entry.path() << std::endl;
-				imageSet.push_back(entry.path().string());//c++ is so weird, i just need to pass in the construtor params and not a new instance 
-				imagesLoaded++;
-			}
-		}
-	}
-	catch (const std::exception & e) { 
-		//probably couldnt find the folder
-		cout << e.what() << endl;
-	}
-	if (IMAGE_LOADING_DEBUG) {
-		for (ourImage img : imageSet) {
-			//show the images
-			namedWindow(img.path, WINDOW_NORMAL);
-			imshow(img.path, img.img);
-			resizeWindow(img.path, 600, 600);
-		}
-	}
-	//claculate all matchign points and transfomrs and store that 
-	if (STEP2) {
-		for (int i = 0; i < MAX_IMAGES_TO_LOAD ; i++) {
-			for (int j = 0; j < MAX_IMAGES_TO_LOAD ; j++) {
-				if (j != i) {
-					//if this is 0 we havent checked this pair yet
-					if (imageSet[i].goodMatchScores[j] == 0) {
-						FindMatches(i, j);
-					}
-				}
-			}
-		}
-	}
-	if (STEP3) {
-		//pathToassemble.push_back({ 1,0 });
-		//pathToassemble.push_back({ 1,2 });
-	}
-
-
-
-
-	if (STEP4) {
-		Mat comp = imageSet[1].img;
-		imagesInComposite.push_back(1);
-		comp = composite2Images(comp,1, 0);
-		imagesInComposite.push_back(0);
-		comp = composite2Images(comp, 1, 2);
-		imagesInComposite.push_back(2);
-		//comp = composite2Images(comp, 0, 3);
-
-		string window = "Final Composite Image of ";
-		for (int i = 0; i < imagesInComposite.size(); i++) {
-			window += imagesInComposite[i] + ",";
-		}
-		namedWindow(window, WINDOW_NORMAL);
-		resizeWindow(window, 600, 600);
-		imshow(window, comp);
-	}
-
-	////waitKey();
-	//if (STEP3) {
-	//	Mat& img_1;
-	//	Mat middleman = imageSet[0].img;
-	//	for (int i = 0; i < MAX_IMAGES_TO_LOAD - 1; i++) {
-	//		// Loop to basically continue updating the final composite image
-	//		finalComposite = composite2Images(middleman, imageSet[i + 1].img);
-	//		string windowTitle = "Composite #" + to_string(i);
-	//		if (IMAGE_COMPOSITE_DEBUG) {
-	//			namedWindow(windowTitle, WINDOW_NORMAL);
-	//			resizeWindow(windowTitle, 600, 600);
-	//			imshow(windowTitle, finalComposite);
-	//		}
-	//		//middleman = finalComposite;
-	//		middleman = PadImage(finalComposite);
-
-	//	}
-
-	//	
-	//	namedWindow("Final Composite Image", WINDOW_NORMAL);
-	//	resizeWindow("Final Composite Image", 600, 600);
-	//	imshow("Final Composite Image", middleman);
-	//	//PadImage(finalComposite);
-	//}
-	waitKey(0);
-}
