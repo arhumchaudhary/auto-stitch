@@ -19,7 +19,7 @@ using namespace cv;
 
 #define STEP1					1 //load images
 #define STEP2					1	//compute matches bwtween all
-#define STEP3					0 //find optimal "path" to stich all  images 
+#define STEP3					1 //find optimal "path" to stich all  images 
 #define STEP4					1 //perform stiching
 #define SAVE_OUTPUT				1
 
@@ -47,7 +47,7 @@ using namespace cv;
 #define SAVE_MATCH_SCORES		1
 #define SAVE_COMPOSITE			1
 #define FOLDER					1
-#define MAX_IMAGES_TO_LOAD		10 // We should add something for all? Idk how though 
+#define MAX_IMAGES_TO_LOAD		5 // We should add something for all? Idk how though 
 
 /* ------------------------------ Global Variables ------------------------------ */
 
@@ -59,6 +59,7 @@ using namespace cv;
 
 string folderPath; // Global for folder path
 vector<int> imagesInComposite; // Indices of the images in the composite
+double imageMatchingThreshold;
 
 /* ------------------------------ Global Data Structures ------------------------------ */
 
@@ -87,9 +88,10 @@ Mat translateImg(Mat& img, Mat& target, int offsetx, int offsety);
 void FindMatches(int img1indx, int img2indx);
 
 // Step 2 - Transformation estimation
-// hmm
+void solveTransforms(vector<Point2d> transformPtsImg1, vector<Point2d> transformPtsImg2, int img1indx, int img2indx);
 
 // Step 3 - Composite Image Generation
+int findCenterImage(); //get the index of the image with the least weights to it 
 Path generateAssemblyPath(); // Generate the optimal assembly path -> This would be cool but could also be hardcoded..
 Mat composite2Images(Mat& composite, int img1indx, int img2indx);
 Mat smartAddImg(Mat& img_1, Mat& img_2);
@@ -101,7 +103,7 @@ public:
 	string name; // File name
 	Mat img; // Image source
 	Mat imgGrey; // Gray Image
-	vector<vector<DMatch>> goodMatches; // Matrix of all of the matches -> Consider implementing a priority queue? or another structure to basically filter out bad matches
+	vector<vector<DMatch>> goodMatches; // Matrix of all of the matches 
 	vector<double> goodMatchScores; // List of all the goodMatchScores
 	vector<Mat> homographyMatrixes; // List of all the homographies to other mats
 
@@ -181,12 +183,13 @@ int main(int argc, char* argv[]) {
 		// Write modular matching algorithm here -> have it work with the data structure we defined
 		// Method to filter through the match metric score in step 1, find transformations
 		// Currently O(n^2) -> Could look to optimize using more advanced analytics between images? 
-		for (int i = 0; i < MAX_IMAGES_TO_LOAD; i++) {
-			for (int j = 0; j < MAX_IMAGES_TO_LOAD; j++) {
+		for (int i = 0; i < imageSet.size(); i++) {
+			for (int j = 0; j < imageSet.size(); j++) {
 				if (j != i) {
 					//if this is 0 we havent checked this pair yet
 					if (imageSet[i].goodMatchScores[j] == 0) {
 						FindMatches(i, j);
+
 					}
 				}
 			}
@@ -203,6 +206,10 @@ int main(int argc, char* argv[]) {
 		}
 		// Some code to find transformations
 		auto stop = high_resolution_clock::now();
+
+
+
+
 		auto duration = duration_cast<microseconds>(stop - startStep);
 		cout << "Time taken for Step 2: " << duration.count() << endl; // Report how long it took
 	}
@@ -213,8 +220,10 @@ int main(int argc, char* argv[]) {
 			cout << "\n Beginning Step 3 - Generating composite image \n" << endl;
 		}
 		// compositeImagePath = generateAssemblyPath();
+		int centerimgIndex = findCenterImage();
+		cout << "Center img is img indx " << centerimgIndex << endl;
 
-		// I think we should load the image with the highest total match matrix? Because wouldnt it be technically in the middle?
+		// load 
 		compositeImage = imageSet[1].img; // Set composite to first image for now
 
 #if 0 // Need to implement this or something like this i think
@@ -262,12 +271,15 @@ int main(int argc, char* argv[]) {
 void setFolderPath() {
 	if (FOLDER == 1) {
 		folderPath = "office2";
+		imageMatchingThreshold = 2500;
 	}
 	else if (FOLDER == 2) {
 		folderPath = "WLH";
+		imageMatchingThreshold = 2500;
 	}
 	else if (FOLDER == 3) {
 		folderPath = "StJames";
+		imageMatchingThreshold = 2500;
 	}
 	else { cout << "Invalid FOLDER choice"; return; }
 }
@@ -480,7 +492,7 @@ void FindMatches(int img1indx, int img2indx) {
 	}
 	vector<Point2d> transformPtsImg1;
 	vector<Point2d> transformPtsImg2;
-	//get the good points, take top 30
+	//get the good points, take top 60
 	for (int i = 0; (i < good_matches.size() && i < 60); i++) {
 		transformPtsImg1.push_back(keypoints_1[good_matches[i].queryIdx].pt);
 		transformPtsImg2.push_back(keypoints_2[good_matches[i].trainIdx].pt);
@@ -494,6 +506,16 @@ void FindMatches(int img1indx, int img2indx) {
 	imageSet[img2indx].goodMatches[img1indx] = good_matches;
 	imageSet[img2indx].goodMatchScores[img1indx] = matchScore;
 
+
+	solveTransforms(transformPtsImg1, transformPtsImg2, img1indx, img2indx);
+
+}
+
+
+/* --------------- Step 2 ----------------- */
+
+void solveTransforms(vector<Point2d> transformPtsImg1, vector<Point2d> transformPtsImg2, int img1indx, int img2indx) {
+	
 	//find the transform
 	Mat homo1 = findHomography(transformPtsImg2, transformPtsImg1, RANSAC, 5.0);
 	if (IMAGE_MATCHING_DEBUG) {
@@ -508,17 +530,27 @@ void FindMatches(int img1indx, int img2indx) {
 	//put in the dataset for later
 	imageSet[img1indx].homographyMatrixes[img2indx] = homo1;
 	imageSet[img2indx].homographyMatrixes[img1indx] = homo2;
-
-
-
 }
 
-
-/* --------------- Step 2 ----------------- */
-
-
-
 /* --------------- Step 3 ----------------- */
+
+
+int findCenterImage() {
+	int minindex = 0;
+	vector<int> sums;
+	for (int i = 0; i < imageSet.size(); i++) {
+		int sum = 0;
+		for (int j = 0; j < imageSet.size(); j++) {
+			sum += imageSet[i].goodMatchScores[j];
+		}
+	}
+	for (int i = 0; i < imageSet.size(); i++) {
+		if (sums[i] < minindex) {
+			minindex = i;
+		}
+	}
+	return minindex;
+}
 
 Path generateAssemblyPath() {
 	// 

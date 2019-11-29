@@ -1,3 +1,8 @@
 ﻿  ELEC474_Assignment.cpp
-C:\Users\brent\Desktop\ELEC474-Exam\takehome\ELEC474_Assignment\ELEC474_Assignment.cpp(407,109): warning C4305: 'argument': truncation from 'double' to 'float'
-  ELEC474_Assignment.vcxproj -> C:\Users\brent\Desktop\ELEC474-Exam\takehome\ELEC474_Assignment\x64\Debug\ELEC474_Assignment.exe
+C:\Users\Admin\Documents\GitHub\ELEC474-Exam\takehome\ELEC474_Assignment\ELEC474_Assignment.cpp(425,109): warning C4305:  'argument': truncation from 'double' to 'float'
+C:\Users\Admin\Documents\GitHub\ELEC474-Exam\takehome\ELEC474_Assignment\ELEC474_Assignment.cpp(544,41): warning C4244:  '+=': conversion from '_Ty' to 'int', possible loss of data
+C:\Users\Admin\Documents\GitHub\ELEC474-Exam\takehome\ELEC474_Assignment\ELEC474_Assignment.cpp(544,41): warning C4244:         with
+C:\Users\Admin\Documents\GitHub\ELEC474-Exam\takehome\ELEC474_Assignment\ELEC474_Assignment.cpp(544,41): warning C4244:         [
+C:\Users\Admin\Documents\GitHub\ELEC474-Exam\takehome\ELEC474_Assignment\ELEC474_Assignment.cpp(544,41): warning C4244:             _Ty=double
+C:\Users\Admin\Documents\GitHub\ELEC474-Exam\takehome\ELEC474_Assignment\ELEC474_Assignment.cpp(544,41): warning C4244:         ]
+  ELEC474_Assignment.vcxproj -> C:\Users\Admin\Documents\GitHub\ELEC474-Exam\takehome\ELEC474_Assignment\x64\Debug\ELEC474_Assignment.exe
