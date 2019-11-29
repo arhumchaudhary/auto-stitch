@@ -2,16 +2,6 @@
 		Auto-Stitch
 	Brent Champion | 20066282
 	Nathaniel Pauze | 20066234
-	
-	COMMITS
-	1.	Started File solution (and didnt do it right apparently) - Brent
-	2.	Implements functinos to basically do whole program - Nat
-	3.	Implements some clean up, modifies main to allow easier toggling between
-		how many images to load and from which folder. Needs some work on the stitching
-		but overall it is producing an output th at looks good - Brent
-	4.	Nat implements better structuring and toggles for program. Also gets it to work better by adding padding 
-	5.	Brent implements some refactoring and got about half the report done
-
 */
 
 #include <iostream>
@@ -22,6 +12,7 @@
 #include "opencv2/features2d.hpp" 
 
 using namespace std;
+using namespace std::chrono;
 using namespace cv;
 
 /* ------------------------------ Global Settings ------------------------------ */
@@ -29,7 +20,7 @@ using namespace cv;
 #define STEP1					1 //load images
 #define STEP2					1	//compute matches bwtween all
 #define STEP3					0 //find optimal "path" to stich all  images 
-#define STEP4					0 //perform stiching
+#define STEP4					1 //perform stiching
 #define SAVE_OUTPUT				1
 
 #define RESCALE_ON_LOAD			0.5 // Rescaling the images for faster program
@@ -40,16 +31,23 @@ using namespace cv;
 #define PADDING_AMMOUNT			2
 #define PADDING_OFFSET			2
 
-// Debug Flags
-#define IMAGE_LOADING_DEBUG		0 // Show loaded image (original)
-#define IMAGE_SMART_ADD_DEBUG	0 // Shows the masks of images 
-#define IMAGE_MATCHING_DEBUG	0 // Shows matched points, tranfomation matrixes, etc - nice
-#define IMAGE_COMPOSITE_DEBUG	0 // Shows each step of the composition of the final image
-#define PRINT_CONSOLE_DEBUG		0 // Printing general info in console 
-#define PRINT_CAMERA_DEBUG		0 // Printing 
+// Image Debug Flags
+#define IMAGE_LOADING_DEBUG		1 // Show loaded image (original)
+#define IMAGE_SMART_ADD_DEBUG	1 // Shows the masks of images 
+#define IMAGE_MATCHING_DEBUG	1 // Shows matched points, tranfomation matrixes, etc - nice
+#define IMAGE_COMPOSITE_DEBUG	1 // Shows each step of the composition of the final image
 
+// Console Printing Flags
+#define PRINT_CONSOLE_DEBUG		1 // Printing general info in console - leave on to see where program is
+#define PRINT_CAMERA_DEBUG		1 // Printing camera matrix information
+#define PRINT_PADDING_DEBUG		1 // Printing padding procedure information
+#define PRINT_MATCHES_DEBUG		1 // Printing match scores 
+
+// File Settings
+#define SAVE_MATCH_SCORES		1
+#define SAVE_COMPOSITE			1
 #define FOLDER					1
-#define MAX_IMAGES_TO_LOAD		10 
+#define MAX_IMAGES_TO_LOAD		10 // We should add something for all? Idk how though 
 
 /* ------------------------------ Global Variables ------------------------------ */
 
@@ -60,104 +58,111 @@ using namespace cv;
 */
 
 string folderPath; // Global for folder path
-
-/* ------------------------------ Function Protocols ------------------------------ */
-/* want to play around with this -> we should have our functions follow an easy to follow pipeline
-something like
-1. setFolderPath()
-2. initSubImages()
-3. matchingProcess()
-	3.1 -> more detail into subprocesses if any?
-4. getTransformations();
-5. buildCompositeImage();
-*/
-Mat translateImg(Mat& img, Mat& target, int offsetx, int offsety);
-void setFolderPath();
-Mat addImagePadding(Mat& img);
-void FindMatches(int img1indx, int img2indx);
-Mat smartAddImg(Mat& img_1, Mat& img_2);
-Mat composite2Images(Mat& composite, int img1indx, int img2indx);
+vector<int> imagesInComposite; // Indices of the images in the composite
 
 /* ------------------------------ Global Data Structures ------------------------------ */
 
+struct PathNode {
+	int path[2]; // Point A to Point B :) 
+};
+
+typedef struct PathNode PathNode;
+typedef vector<PathNode> Path;
+
+Path compositeImagePath; // Nice
+
+/* ------------------------------ Function Protocols ------------------------------ */
+
+// File management 
+void setFolderPath();
+bool importImages(string folderPath);
+bool saveResult(Mat& src, string filename);
+bool saveMatches(string filename);
+
+// Preprocessing :) 
+Mat addImagePadding(Mat& img);
+Mat translateImg(Mat& img, Mat& target, int offsetx, int offsety);
+
+// Step 1 - Match finding
+void FindMatches(int img1indx, int img2indx);
+
+// Step 2 - Transformation estimation
+// hmm
+
+// Step 3 - Composite Image Generation
+Path generateAssemblyPath(); // Generate the optimal assembly path -> This would be cool but could also be hardcoded..
+Mat composite2Images(Mat& composite, int img1indx, int img2indx);
+Mat smartAddImg(Mat& img_1, Mat& img_2);
+
+/* ------------------------------ Global Classes --------------------------------- */
 class subImage {
-	public:
-		string path; // File path
-		string name; // File name
-		Mat img; // Image source
-		Mat imgGrey; // Gray Image
-		vector<vector<DMatch>> goodMatches; // Matrix of all of the matches -> Consider implementing a priority queue? or another structure to basically filter out bad matches
-		vector<double> goodMatchScores; // List of all the goodMatchScores
-		vector<Mat> homographyMatrixes; // List of all the homographies to other mats
-	
-		// subImage Constructor
-		subImage(string path) {
-			goodMatches.resize(MAX_IMAGES_TO_LOAD);
-			goodMatchScores.resize(MAX_IMAGES_TO_LOAD);
-			homographyMatrixes.resize(MAX_IMAGES_TO_LOAD);
+public:
+	string path; // File path
+	string name; // File name
+	Mat img; // Image source
+	Mat imgGrey; // Gray Image
+	vector<vector<DMatch>> goodMatches; // Matrix of all of the matches -> Consider implementing a priority queue? or another structure to basically filter out bad matches
+	vector<double> goodMatchScores; // List of all the goodMatchScores
+	vector<Mat> homographyMatrixes; // List of all the homographies to other mats
 
-			this->path = path;
-			//load the image, but center it with a black border half its size
-			Mat distorted = imread(path);
-			Mat temp = Mat(distorted.rows, distorted.cols, distorted.type());
-			//rescale if specified
-			if (RESCALE_ON_LOAD != 1) {
-				resize(distorted, distorted, Size(), RESCALE_ON_LOAD, RESCALE_ON_LOAD);
-			}
+	// subImage Constructor
+	subImage(string path) {
+		goodMatches.resize(MAX_IMAGES_TO_LOAD);
+		goodMatchScores.resize(MAX_IMAGES_TO_LOAD);
+		homographyMatrixes.resize(MAX_IMAGES_TO_LOAD);
 
+		this->path = path;
 
-			//undistort it if option set
-			if (UNDISTORT_ON_LOAD) {
-				Mat intrinsic = (Mat_<double>(3, 3) << 600, 0, distorted.cols / 2, 0, 600, distorted.rows / 2, 0, 0, 1);//camera matrix
-				Mat distortionCoef = (Mat_<double>(1, 5) << 0.2, 0.05, 0.00, 0, 0); //radial blur coefs
-				Mat camMatrix = getOptimalNewCameraMatrix(intrinsic, distortionCoef, distorted.size(), 0);//make the actual transforma matrix 
-				if (IMAGE_LOADING_DEBUG) {
-					cout << "Cam matrix" << endl;
-					cout << camMatrix << endl;
-				}
-				temp = Mat(distorted.rows, distorted.cols, distorted.type());
-				undistort(distorted, temp, camMatrix, distortionCoef);
-			}
-			else {
-				temp = distorted;
-			}
-
-			this->img = addImagePadding(temp);
-			//// center it with a black border PADDING_AMMOUNT its size
-			//this->img = Mat(temp.rows * PADDING_AMMOUNT, temp.cols * PADDING_AMMOUNT, temp.type());
-			//Mat trans_mat = (Mat_<double>(2, 3) << 1, 0, temp.cols / PADDING_OFFSET, 0, 1, temp.rows / PADDING_OFFSET);
-			//warpAffine(temp, this->img, trans_mat, this->img.size());
-
-			cvtColor(this->img, this->imgGrey, COLOR_RGB2GRAY);
+		//load the image, but center it with a black border half its size
+		Mat distorted = imread(path);
+		Mat temp = Mat(distorted.rows, distorted.cols, distorted.type());
+		//rescale if specified
+		if (RESCALE_ON_LOAD == 1) {
+			resize(distorted, distorted, Size(), RESCALE_ON_LOAD, RESCALE_ON_LOAD);
 		}
+
+		// Undistort the image with the camera matrix -- major key
+		if (UNDISTORT_ON_LOAD) {
+			Mat intrinsic = (Mat_<double>(3, 3) << 600, 0, distorted.cols / 2, 0, 600, distorted.rows / 2, 0, 0, 1); // ... 
+			Mat distortionCoef = (Mat_<double>(1, 5) << 0.2, 0.05, 0.00, 0, 0); // We should make this a global setting
+			Mat camMatrix = getOptimalNewCameraMatrix(intrinsic, distortionCoef, distorted.size(), 0);//make the actual transforma matrix 
+			if (IMAGE_LOADING_DEBUG) {
+				cout << "Camera matrix: \n" << camMatrix << endl;
+			}
+			temp = Mat(distorted.rows, distorted.cols, distorted.type());
+			undistort(distorted, temp, camMatrix, distortionCoef);
+		}
+		else {
+			temp = distorted;
+		}
+
+		this->img = addImagePadding(temp);
+		//// center it with a black border PADDING_AMMOUNT its size
+		//this->img = Mat(temp.rows * PADDING_AMMOUNT, temp.cols * PADDING_AMMOUNT, temp.type());
+		//Mat trans_mat = (Mat_<double>(2, 3) << 1, 0, temp.cols / PADDING_OFFSET, 0, 1, temp.rows / PADDING_OFFSET);
+		//warpAffine(temp, this->img, trans_mat, this->img.size());
+
+		cvtColor(this->img, this->imgGrey, COLOR_RGB2GRAY);
+	}
 }; // Class storing details regarding an image
 
 vector<subImage> imageSet; // Initialize a vector of all of the subImages -> to be combined into the 'super' image
 
-//indexes of the images in our composite allready
-vector<int> imagesInComposite; // could be defined in main?
-vector<int[2]> pathToassemble; // Nice
-
 /* --------------------------------- Main Routine ------------------------------------- */
+
 int main(int argc, char* argv[]) {
+	auto start = high_resolution_clock::now();
+	Mat compositeImage;
+
 	setFolderPath(); // Set the folder based for testing
 	if (PRINT_CONSOLE_DEBUG) { // Initial steps
-		cout << "current program running from direcotry" << endl;
-		cout << filesystem::current_path() << endl;
-		cout << "opening " << MAX_IMAGES_TO_LOAD << " images from " << folderPath << " folder" << endl;
+		cout << "\n Program running from directory: " << filesystem::current_path() << endl;
+		cout << "\n Opening " << MAX_IMAGES_TO_LOAD << " images from " << folderPath << " folder \n" << endl;
 	}
-	try { 
-		int imagesLoaded = 0;
-		for (const auto& entry : std::filesystem::directory_iterator(folderPath)) {
-			if (imagesLoaded < MAX_IMAGES_TO_LOAD) {
-				cout << entry.path() << std::endl;
-				imageSet.push_back(entry.path().string());//c++ is so weird, i just need to pass in the construtor params and not a new instance 
-				imagesLoaded++;
-			}
-		}
-	} catch (const std::exception & e) {
-		//probably couldnt find the folder
-		cout << e.what() << endl;
+
+	if (!importImages(folderPath)) {
+		cout << "Problem importing images!" << endl;
+		return -1;
 	}
 	
 	if (IMAGE_LOADING_DEBUG) { // Show the original images
@@ -168,57 +173,56 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
-	if (STEP1) {
+	if (STEP1) { // Match Features
+		auto startStep = high_resolution_clock::now();
+		if (PRINT_CONSOLE_DEBUG) { // Initial steps
+			cout << "\n Beginning Step 1 - Feature Matching Process \n" << endl;
+		}
 		// Write modular matching algorithm here -> have it work with the data structure we defined
-	}
-
-	if (STEP2) {
 		// Method to filter through the match metric score in step 1, find transformations
+		// Currently O(n^2) -> Could look to optimize using more advanced analytics between images? 
 		for (int i = 0; i < MAX_IMAGES_TO_LOAD; i++) {
 			for (int j = 0; j < MAX_IMAGES_TO_LOAD; j++) {
 				if (j != i) {
 					//if this is 0 we havent checked this pair yet
 					if (imageSet[i].goodMatchScores[j] == 0) {
-						FindMatches(i, j); 
+						FindMatches(i, j);
 					}
 				}
 			}
 		}
+		auto stop = high_resolution_clock::now();
+		auto duration = duration_cast<microseconds>(stop - startStep);
+		cout << "Time taken for Step 1: " << duration.count() << endl; // Report how long it took
+	}
+
+	if (STEP2) { // Get transformations
+		auto startStep = high_resolution_clock::now();
+		if (PRINT_CONSOLE_DEBUG) { // Initial steps
+			cout << "\n Beginning Step 2 - Generating Transformations \n" << endl;
+		}
+		// Some code to find transformations
+		auto stop = high_resolution_clock::now();
+		auto duration = duration_cast<microseconds>(stop - startStep);
+		cout << "Time taken for Step 2: " << duration.count() << endl; // Report how long it took
 	}
 	
 	if (STEP3) {
-		// I think that this should be the generating composite image section
-		//pathToassemble.push_back({ 1,0 });
-		//pathToassemble.push_back({ 1,2 });
-			////waitKey();
-	//if (STEP3) {
-	//	Mat& img_1;
-	//	Mat middleman = imageSet[0].img;
-	//	for (int i = 0; i < MAX_IMAGES_TO_LOAD - 1; i++) {
-	//		// Loop to basically continue updating the final composite image
-	//		finalComposite = composite2Images(middleman, imageSet[i + 1].img);
-	//		string windowTitle = "Composite #" + to_string(i);
-	//		if (IMAGE_COMPOSITE_DEBUG) {
-	//			namedWindow(windowTitle, WINDOW_NORMAL);
-	//			resizeWindow(windowTitle, 600, 600);
-	//			imshow(windowTitle, finalComposite);
-	//		}
-	//		//middleman = finalComposite;
-	//		middleman = PadImage(finalComposite);
+		auto startStep = high_resolution_clock::now();
+		if (PRINT_CONSOLE_DEBUG) { // Initial steps
+			cout << "\n Beginning Step 3 - Generating composite image \n" << endl;
+		}
+		// compositeImagePath = generateAssemblyPath();
 
-	//	}
+		// I think we should load the image with the highest total match matrix? Because wouldnt it be technically in the middle?
+		compositeImage = imageSet[1].img; // Set composite to first image for now
 
-	//	
-	//	namedWindow("Final Composite Image", WINDOW_NORMAL);
-	//	resizeWindow("Final Composite Image", 600, 600);
-	//	imshow("Final Composite Image", middleman);
-	//	//PadImage(finalComposite);
-	//}
+#if 0 // Need to implement this or something like this i think
+		for (auto pathEntry : compositeImagePath) {
+			compositeImage = composite2Images(compositeImage, pathEntry[0], pathEntry[1]);
+		}
+#endif // 0 // Need to implement this or something like this i think
 
-	}
-
-	if (STEP4) {
-		cout << "Beginning step 4" << endl;
 		Mat comp = imageSet[1].img;
 		imagesInComposite.push_back(1);
 		comp = composite2Images(comp, 1, 0);
@@ -234,22 +238,26 @@ int main(int argc, char* argv[]) {
 		namedWindow(window, WINDOW_NORMAL);
 		resizeWindow(window, 600, 600);
 		imshow(window, comp);
+		
+		auto stop = high_resolution_clock::now();
+		auto duration = duration_cast<microseconds>(stop - startStep);
+		cout << "Time taken for Step 3: " << duration.count() << endl; // Report how long it took
 	}
 
 	if (SAVE_OUTPUT) {
-
+		saveResult(compositeImage, "CompositeImage.jpg");
 	}
+
+	auto stop = high_resolution_clock::now();
+	auto duration = duration_cast<microseconds>(stop - start);
+	cout << "Total time taken: " << duration.count() << endl; // Report how long it took
 
 	waitKey(0);
 }
 
-
 /* ----------------------------- Function Implementations ------------------------------*/
-Mat translateImg(Mat& img, Mat& target, int offsetx, int offsety) {
-	Mat trans_mat = (Mat_<double>(2, 3) << 1, 0, offsetx, 0, 1, offsety);
-	warpAffine(img, target, trans_mat, img.size());
-	return img;
-}
+
+/* ------------ File Management ----------- */
 
 void setFolderPath() {
 	if (FOLDER == 1) {
@@ -264,8 +272,49 @@ void setFolderPath() {
 	else { cout << "Invalid FOLDER choice"; return; }
 }
 
-//function 
-Mat addImagePadding(Mat&  img) {
+bool importImages(string folderPath) {
+	try {
+		int imagesLoaded = 0;
+		for (const auto& entry : std::filesystem::directory_iterator(folderPath)) {
+			if (imagesLoaded < MAX_IMAGES_TO_LOAD) {
+				// cout << entry.path() << std::endl;
+				imageSet.push_back(entry.path().string());//c++ is so weird, i just need to pass in the construtor params and not a new instance 
+				imagesLoaded++;
+			}
+		} return true;
+	}
+	catch (const std::exception & e) {
+		//probably couldnt find the folder
+		cout << e.what() << endl;
+			return false;
+	}
+}
+
+bool saveResult(Mat& src, string filename) {
+	try {
+		imwrite(filename, src);
+		return true;
+	}
+	catch (Exception & e) {
+		cout << e.what() << endl;
+		return false;
+	}
+}
+
+bool saveMatches(string filename) {
+	return true;
+}
+
+
+/* ------------- Preprocessing ------------ */
+
+Mat translateImg(Mat& img, Mat& target, int offsetx, int offsety) {
+	Mat trans_mat = (Mat_<double>(2, 3) << 1, 0, offsetx, 0, 1, offsety);
+	warpAffine(img, target, trans_mat, img.size());
+	return img;
+}
+
+Mat addImagePadding(Mat& img) {
 	int currentPaddingTop = 0;
 	int currentPaddingLeft = 0;
 	int currentPaddingBottom = 0;
@@ -283,7 +332,7 @@ Mat addImagePadding(Mat&  img) {
 			}
 		}
 	}
-	leftCheck:
+leftCheck:
 	//start from left 
 	for (int c = 0; c < img.cols; c++) {
 		for (int r = 0; r < img.rows; r++) {
@@ -293,32 +342,32 @@ Mat addImagePadding(Mat&  img) {
 			}
 		}
 	}
-	bottomCheck:
+bottomCheck:
 	//start from bottom
-	for (int r = img.rows-1; r >=0; r--) {
+	for (int r = img.rows - 1; r >= 0; r--) {
 		for (int c = 0; c < img.cols; c++) {
 			if (img.at<Vec3b>(r, c) != Vec3b(0, 0, 0)) {
-				currentPaddingBottom = img.rows - r -1;
+				currentPaddingBottom = img.rows - r - 1;
 				goto rightCheck;
 			}
 		}
 	}
-	rightCheck:
+rightCheck:
 	//start from right
 	for (int c = img.cols - 1; c >= 0; c--) {
 		for (int r = 0; r < img.rows; r++) {
 			if (img.at<Vec3b>(r, c) != Vec3b(0, 0, 0)) {
-				currentPaddingRight = img.cols -c -1;
+				currentPaddingRight = img.cols - c - 1;
 				goto endOfChecks;
 			}
 		}
 	}
-	endOfChecks:
+endOfChecks:
 
 
 	cout << "Image is " << img.rows << " rows by " << img.cols << " cols" << endl;
 	cout << "Top padding: " << currentPaddingTop << " Left padding: " << currentPaddingLeft << " Bottom padding: " << currentPaddingBottom << " Right padding: " << currentPaddingRight << endl;
-	
+
 
 	int paddingNeededTop = 0;
 	int paddingNeededLeft = 0;
@@ -348,8 +397,171 @@ Mat addImagePadding(Mat&  img) {
 
 }
 
-//takes two images and adds them, img2 on top with some edge bluring 
-Mat smartAddImg(Mat & img_1, Mat & img_2) {
+
+/* --------------- Step 1 ----------------- */
+
+void FindMatches(int img1indx, int img2indx) {
+	Mat& img_1 = imageSet[img1indx].img;
+	Mat& img_2 = imageSet[img2indx].img;
+	const int numOfPointsToGet = 1000; //interestingly this has a minor effect on processign time.... weird
+	double matchScore = 0;
+	//intitate orb detector 
+	vector<KeyPoint> keypoints_1, keypoints_2;
+	Mat descriptors_1, descriptors_2;
+	//Ptr<SIFT> detector = cv::xfeatures2d::SIFT::create;
+	//Ptr<FeatureDetector> detector = ORB::create();
+	Ptr<FeatureDetector> detector = ORB::create(numOfPointsToGet, 1.2, 8, 127, 0, 2, ORB::HARRIS_SCORE, 127, 20);
+	Ptr<DescriptorExtractor> descriptor = ORB::create();
+	Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
+
+	//detect points and compute descriptors
+	detector->detect(img_1, keypoints_1);
+	detector->detect(img_2, keypoints_2);
+	descriptor->compute(img_1, keypoints_1, descriptors_1);
+	descriptor->compute(img_2, keypoints_2, descriptors_2);
+
+	//draw keypoints
+	//Mat outimg1;
+	//drawKeypoints(img_1, keypoints_1, outimg1, Scalar::all(-1), DrawMatchesFlags::DEFAULT);
+
+	vector<DMatch> matches;
+	//BFMatcher matcher ( NORM_HAMMING );
+	matcher->match(descriptors_1, descriptors_2, matches);
+	double min_dist = 10000, max_dist = 0;
+
+
+	//Find the minimum and maximum distances between mathces, so the most similar and the least similar 
+	for (int i = 0; i < descriptors_1.rows; i++)
+	{
+		double dist = matches[i].distance;
+		if (dist < min_dist) min_dist = dist;
+		if (dist > max_dist) max_dist = dist;
+		matchScore += (1 + dist) * (1 + dist);
+	}
+	//match score is the average of all the distances
+	matchScore = double(double(matchScore) / double(numOfPointsToGet));
+
+
+	printf("-Matches between img %d and %d -\n", img1indx, img2indx);
+	//printf("-- Max dist : %f \n", max_dist);
+	//printf("-- Min dist : %f \n", min_dist);
+	printf("-- Match score : %f \n", matchScore);
+
+	std::vector< DMatch > good_matches;
+	//When the distance between the descriptors is 
+	//greater than twice the minimum distance, the match is considered to be incorrect. 
+	//But sometimes the minimum distance will be very small, and an empirical value of 30 is set as the lower limit.
+	for (int i = 0; i < descriptors_1.rows; i++)
+	{
+		if (matches[i].distance <= max(2 * min_dist, 30.0))
+		{
+			good_matches.push_back(matches[i]);
+		}
+	}
+
+	Mat img_goodmatch;
+	//-- Draw results 
+	if (IMAGE_MATCHING_DEBUG) {
+
+		//drawMatches(img_1, keypoints_1, img_2, keypoints_2, matches, img_match);
+		drawMatches(img_1, keypoints_1, img_2, keypoints_2, good_matches, img_goodmatch);
+		//namedWindow("matches", WINDOW_NORMAL);
+		//imshow("matches", img_match);
+		//resizeWindow("matches", 600, 600);
+		string window = "good matches between " + to_string(img1indx) + " and " + to_string(img2indx);
+		namedWindow(window, WINDOW_NORMAL);
+		imshow(window, img_goodmatch);
+		resizeWindow(window, 800, 800);
+	}
+	//estimate affine transfomation 
+	//get points to use 
+	if (IMAGE_MATCHING_DEBUG) {
+		cout << "points used to calc transform" << endl;
+	}
+	vector<Point2d> transformPtsImg1;
+	vector<Point2d> transformPtsImg2;
+	//get the good points, take top 30
+	for (int i = 0; (i < good_matches.size() && i < 60); i++) {
+		transformPtsImg1.push_back(keypoints_1[good_matches[i].queryIdx].pt);
+		transformPtsImg2.push_back(keypoints_2[good_matches[i].trainIdx].pt);
+		if (IMAGE_MATCHING_DEBUG) {
+			//cout << transformPtsImg1[i] << " -> " << transformPtsImg2[i] << endl;
+		}
+	}
+	//put the good points and the score of all points in the image set data
+	imageSet[img1indx].goodMatches[img2indx] = good_matches;
+	imageSet[img1indx].goodMatchScores[img2indx] = matchScore;
+	imageSet[img2indx].goodMatches[img1indx] = good_matches;
+	imageSet[img2indx].goodMatchScores[img1indx] = matchScore;
+
+	//find the transform
+	Mat homo1 = findHomography(transformPtsImg2, transformPtsImg1, RANSAC, 5.0);
+	if (IMAGE_MATCHING_DEBUG) {
+		cout << "Transfomation Matrix" << endl;
+		cout << homo1 << endl;
+	}
+	Mat homo2 = findHomography(transformPtsImg1, transformPtsImg2, RANSAC, 5.0);
+	if (IMAGE_MATCHING_DEBUG) {
+		cout << "Transfomation Matrix" << endl;
+		cout << homo2 << endl;
+	}
+	//put in the dataset for later
+	imageSet[img1indx].homographyMatrixes[img2indx] = homo1;
+	imageSet[img2indx].homographyMatrixes[img1indx] = homo2;
+
+
+
+}
+
+
+/* --------------- Step 2 ----------------- */
+
+
+
+/* --------------- Step 3 ----------------- */
+
+Path generateAssemblyPath() {
+	// 
+	PathNode test;
+	test.path[0] = 1; test.path[1] = 1;
+	Path assemblyPath;
+	assemblyPath.push_back(test);
+
+	return assemblyPath;
+	
+}
+
+Mat composite2Images(Mat& composite, int img1indx, int img2indx) {
+	//Mat& img_1 = imageSet[img1indx].img;
+	Mat& img_1 = composite;
+	Mat& img_2 = imageSet[img2indx].img;
+	Mat homo = imageSet[img1indx].homographyMatrixes[img2indx];
+
+	//apply transformation to image 
+	Mat warpedImg = Mat(img_2.rows, img_2.cols, img_2.type());
+	warpPerspective(img_2, warpedImg, homo, warpedImg.size());
+
+	if (IMAGE_MATCHING_DEBUG) {
+		namedWindow("warpedIMG", WINDOW_NORMAL);
+		imshow("warpedIMG", warpedImg);
+		resizeWindow("warpedIMG", 800, 800);
+	}
+
+	//compose images
+	Mat compositeImg;
+
+	compositeImg = smartAddImg(img_1, warpedImg);
+	//addWeighted(img_1, 0.5, warpedImg, 0.5, 1, compositeImg);
+	//display
+	string window = "composite Img using transform " + to_string(img1indx) + " and " + to_string(img2indx);
+	namedWindow(window, WINDOW_NORMAL);
+	imshow(window, compositeImg);
+	resizeWindow(window, 800, 800);
+
+	return compositeImg;
+}
+
+Mat smartAddImg(Mat& img_1, Mat& img_2) {
 	//solid mask
 	Mat solidMask = Mat::zeros(img_2.rows, img_2.cols, CV_8U);
 	Mat erodedMask = Mat::zeros(img_2.rows, img_2.cols, CV_8U);
@@ -409,157 +621,8 @@ Mat smartAddImg(Mat & img_1, Mat & img_2) {
 					img_1.at<Vec3b>(r, c) = img2Pixel;
 				}
 			}
-			
+
 		}
 	}
-	
-
-	return img_1 ;
+	return img_1;
 }
-
-//compute best mathces between 2 images using the indexes in image set, find transform too
-void FindMatches(int img1indx, int img2indx) {
-	Mat& img_1 = imageSet[img1indx].img;
-	Mat& img_2 = imageSet[img2indx].img;
-	const int numOfPointsToGet =1000; //interestingly this has a minor effect on processign time.... weird
-	double matchScore = 0;
-	//intitate orb detector 
-	vector<KeyPoint> keypoints_1, keypoints_2;
-	Mat descriptors_1, descriptors_2;
-	//Ptr<SIFT> detector = cv::xfeatures2d::SIFT::create;
-	//Ptr<FeatureDetector> detector = ORB::create();
-	Ptr<FeatureDetector> detector = ORB::create(numOfPointsToGet, 1.2, 8, 127, 0, 2, ORB::HARRIS_SCORE, 127, 20);
-	Ptr<DescriptorExtractor> descriptor = ORB::create();
-	Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
-
-	//detect points and compute descriptors
-	detector->detect(img_1, keypoints_1);
-	detector->detect(img_2, keypoints_2);
-	descriptor->compute(img_1, keypoints_1, descriptors_1);
-	descriptor->compute(img_2, keypoints_2, descriptors_2);
-
-	//draw keypoints
-	//Mat outimg1;
-	//drawKeypoints(img_1, keypoints_1, outimg1, Scalar::all(-1), DrawMatchesFlags::DEFAULT);
-
-	vector<DMatch> matches;
-	//BFMatcher matcher ( NORM_HAMMING );
-	matcher->match(descriptors_1, descriptors_2, matches);
-	double min_dist = 10000, max_dist = 0;
-
-
-	//Find the minimum and maximum distances between mathces, so the most similar and the least similar 
-	for (int i = 0; i < descriptors_1.rows; i++)
-	{
-		double dist = matches[i].distance;
-		if (dist < min_dist) min_dist = dist;
-		if (dist > max_dist) max_dist = dist;
-		matchScore += (1+dist)*(1+dist);
-	}
-	//match score is the average of all the distances
-	matchScore = double(double(matchScore) / double(numOfPointsToGet));
-
-
-	printf("-Matches between img %d and %d -\n", img1indx, img2indx);
-	//printf("-- Max dist : %f \n", max_dist);
-	//printf("-- Min dist : %f \n", min_dist);
-	printf("-- Match score : %f \n", matchScore);
-
-	std::vector< DMatch > good_matches;
-	//When the distance between the descriptors is 
-	//greater than twice the minimum distance, the match is considered to be incorrect. 
-	//But sometimes the minimum distance will be very small, and an empirical value of 30 is set as the lower limit.
-	for (int i = 0; i < descriptors_1.rows; i++)
-	{
-		if (matches[i].distance <= max(2 * min_dist, 30.0))
-		{
-			good_matches.push_back(matches[i]);
-		}
-	}
-	
-	Mat img_goodmatch;
-	//-- Draw results 
-	if (IMAGE_MATCHING_DEBUG) {
-
-		//drawMatches(img_1, keypoints_1, img_2, keypoints_2, matches, img_match);
-		drawMatches(img_1, keypoints_1, img_2, keypoints_2, good_matches, img_goodmatch);
-		//namedWindow("matches", WINDOW_NORMAL);
-		//imshow("matches", img_match);
-		//resizeWindow("matches", 600, 600);
-		string window = "good matches between " + to_string(img1indx) + " and " + to_string(img2indx);
-		namedWindow(window, WINDOW_NORMAL);
-		imshow(window, img_goodmatch);
-		resizeWindow(window, 800, 800);
-	}
-	//estimate affine transfomation 
-	//get points to use 
-	if (IMAGE_MATCHING_DEBUG) {
-		cout << "points used to calc transform" << endl;
-	}
-	vector<Point2d> transformPtsImg1;
-	vector<Point2d> transformPtsImg2;
-	//get the good points, take top 30
-	for (int i = 0; (i < good_matches.size() && i < 60); i++) {
-		transformPtsImg1.push_back(keypoints_1[good_matches[i].queryIdx].pt);
-		transformPtsImg2.push_back(keypoints_2[good_matches[i].trainIdx].pt);
-		if (IMAGE_MATCHING_DEBUG) {
-			//cout << transformPtsImg1[i] << " -> " << transformPtsImg2[i] << endl;
-		}
-	}
-	//put the good points and the score of all points in the image set data
-	imageSet[img1indx].goodMatches[img2indx] = good_matches;
-	imageSet[img1indx].goodMatchScores[img2indx] = matchScore;
-	imageSet[img2indx].goodMatches[img1indx] = good_matches;
-	imageSet[img2indx].goodMatchScores[img1indx] = matchScore;
-	
-	//find the transform
-	Mat homo1 = findHomography(transformPtsImg2, transformPtsImg1, RANSAC, 5.0);
-	if (IMAGE_MATCHING_DEBUG) {
-		cout << "Transfomation Matrix" << endl;
-		cout << homo1 << endl;
-	}
-	Mat homo2 = findHomography(transformPtsImg1, transformPtsImg2, RANSAC, 5.0);
-	if (IMAGE_MATCHING_DEBUG) {
-		cout << "Transfomation Matrix" << endl;
-		cout << homo2 << endl;
-	}
-	//put in the dataset for later
-	imageSet[img1indx].homographyMatrixes[img2indx] = homo1;
-	imageSet[img2indx].homographyMatrixes[img1indx] = homo2;
-	
-
-
-}
-
-// Composite 2 images by feature masking 
-Mat composite2Images(Mat& composite, int img1indx, int img2indx) {
-	//Mat& img_1 = imageSet[img1indx].img;
-	Mat& img_1 = composite;
-	Mat& img_2 = imageSet[img2indx].img;
-	Mat homo = imageSet[img1indx].homographyMatrixes[img2indx];
-
-	//apply transformation to image 
-	Mat warpedImg = Mat(img_2.rows, img_2.cols, img_2.type());
-	warpPerspective(img_2, warpedImg, homo, warpedImg.size());
-
-	if (IMAGE_MATCHING_DEBUG) {
-		namedWindow("warpedIMG", WINDOW_NORMAL);
-		imshow("warpedIMG", warpedImg);
-		resizeWindow("warpedIMG", 800, 800);
-	}
-
-	//compose images
-	Mat compositeImg;
-
-	compositeImg = smartAddImg(img_1, warpedImg);
-	//addWeighted(img_1, 0.5, warpedImg, 0.5, 1, compositeImg);
-	//display
-	string window = "composite Img using transform " + to_string(img1indx) + " and " + to_string(img2indx);
-	namedWindow(window, WINDOW_NORMAL);
-	imshow(window, compositeImg);
-	resizeWindow(window, 800, 800);
-
-	return compositeImg;
-}
-
-
