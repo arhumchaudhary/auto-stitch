@@ -23,18 +23,21 @@ using namespace cv;
 #define STEP4					1 //perform stiching
 #define SAVE_OUTPUT				1
 
-#define RESCALE_ON_LOAD			0.5 // Rescaling the images for faster program
-#define UNDISTORT_ON_LOAD		1
+#define RESCALE_ON_LOAD			0.3 // Rescaling the images for faster program (1 is no rescalling, 0.5 is half, etc)
+#define UNDISTORT_ON_LOAD		0
 #define SMART_ADD_GAUSIAN_BLUR	101
 
 #define PIXEL_PADDING			600 //how many pixels should pad each image 
 #define PADDING_AMMOUNT			2
 #define PADDING_OFFSET			2
 
+#define ORB_POINT_COUNT		500 //how many orb poitns to find
+
 // Image Debug Flags
 #define IMAGE_LOADING_DEBUG		1 // Show loaded image (original)
 #define IMAGE_SMART_ADD_DEBUG	1 // Shows the masks of images 
-#define IMAGE_MATCHING_DEBUG	1 // Shows matched points, tranfomation matrixes, etc - nice
+#define IMAGE_MATCHING_DEBUG	1 //tranfomation matrixes, etc - nice
+#define IMAGE_MATCHING_DISPLAY  0 //Shows matched points
 #define IMAGE_COMPOSITE_DEBUG	1 // Shows each step of the composition of the final image
 
 // Console Printing Flags
@@ -46,8 +49,8 @@ using namespace cv;
 // File Settings
 #define SAVE_MATCH_SCORES		1
 #define SAVE_COMPOSITE			1
-#define FOLDER					1
-#define MAX_IMAGES_TO_LOAD		5 // We should add something for all? Idk how though 
+#define FOLDER					2
+#define MAX_IMAGES_TO_LOAD		4 // We should add something for all? Idk how though 
 
 /* ------------------------------ Global Variables ------------------------------ */
 
@@ -55,6 +58,7 @@ using namespace cv;
 1 - Office
 2 - WLH
 3 - StJames
+4- Nat's dirty room (Room)
 */
 
 string folderPath; // Global for folder path
@@ -88,12 +92,12 @@ Mat translateImg(Mat& img, Mat& target, int offsetx, int offsety);
 void FindMatches(int img1indx, int img2indx);
 
 // Step 2 - Transformation estimation
-void solveTransforms(vector<Point2d> transformPtsImg1, vector<Point2d> transformPtsImg2, int img1indx, int img2indx);
+void solveTransforms(vector<Point2d>& transformPtsImg1, vector<Point2d>& transformPtsImg2, int img1indx, int img2indx);
 
 // Step 3 - Composite Image Generation
 int findCenterImage(); //get the index of the image with the least weights to it 
 Path generateAssemblyPath(); // Generate the optimal assembly path -> This would be cool but could also be hardcoded..
-Mat composite2Images(Mat& composite, int img1indx, int img2indx);
+Mat composite2Images(Mat& composite, int img1indx, int img2indx, bool useImageSpecified, Mat& imageSpecified);
 Mat smartAddImg(Mat& img_1, Mat& img_2);
 
 /* ------------------------------ Global Classes --------------------------------- */
@@ -119,7 +123,7 @@ public:
 		Mat distorted = imread(path);
 		Mat temp = Mat(distorted.rows, distorted.cols, distorted.type());
 		//rescale if specified
-		if (RESCALE_ON_LOAD == 1) {
+		if (RESCALE_ON_LOAD != 1) {
 			resize(distorted, distorted, Size(), RESCALE_ON_LOAD, RESCALE_ON_LOAD);
 		}
 
@@ -219,34 +223,89 @@ int main(int argc, char* argv[]) {
 		if (PRINT_CONSOLE_DEBUG) { // Initial steps
 			cout << "\n Beginning Step 3 - Generating composite image \n" << endl;
 		}
-		// compositeImagePath = generateAssemblyPath();
+		// dind center image
 		int centerimgIndex = findCenterImage();
 		cout << "Center img is img indx " << centerimgIndex << endl;
 
-		// load 
-		compositeImage = imageSet[1].img; // Set composite to first image for now
+		// load midle image 
+		compositeImage = imageSet[centerimgIndex].img; // Set composite to first image for now
+		imagesInComposite.push_back(centerimgIndex);
 
-#if 0 // Need to implement this or something like this i think
-		for (auto pathEntry : compositeImagePath) {
-			compositeImage = composite2Images(compositeImage, pathEntry[0], pathEntry[1]);
+
+		//all images that map to center image below threshold get added to composite
+		for (int i = 0; i < imageSet.size(); i++) {
+			if (i != centerimgIndex) {
+				if (imageSet[i].goodMatchScores[centerimgIndex] < imageMatchingThreshold) {
+					imagesInComposite.push_back(i);
+					compositeImage = composite2Images(compositeImage, centerimgIndex, i,false,compositeImage);
+				}
+			}
 		}
-#endif // 0 // Need to implement this or something like this i think
+		
+		vector<int> imagesInCompositeLevel2;
+		//for all images that map to an image in the composite but no the center
+		for (int i = 0; i < imageSet.size(); i++) {//check all images 
+			for (int j = 1; j < imagesInComposite.size(); j++) {//with all in composite
+				//dont map to center
+				if (i != centerimgIndex) {
+					//dont map to itself
+					if (i != imagesInComposite[j]) {
+						
+						//make sure this one isnt in the lvl2 composite vector allready 
+						//TODO I had one for lvl 1 composite too but it was causing a infinite loop
+						bool flag = true;
+						/*
+						for (int x = 0; x < imagesInCompositeLevel2.size();x++) {
+							if (i = imagesInCompositeLevel2[x]) {
+								flag = false;
+							}
+						}*/
+						if (flag) {
+							//now if it maps to the one in the composite
+							if (imageSet[imagesInComposite[j]].goodMatchScores[i] < imageMatchingThreshold) {
+								Mat temp = Mat::zeros(compositeImage.rows, compositeImage.cols, compositeImage.type());
+								temp = composite2Images(temp, imagesInComposite[j], i, false, compositeImage);
+								string window = "temp of " + to_string(i) + " to " + to_string(imagesInComposite[j]);
+								namedWindow(window, WINDOW_NORMAL);
+								resizeWindow(window, 600, 600);
+								imshow(window, temp);
 
-		Mat comp = imageSet[1].img;
-		imagesInComposite.push_back(1);
-		comp = composite2Images(comp, 1, 0);
-		imagesInComposite.push_back(0);
-		comp = composite2Images(comp, 1, 2);
-		imagesInComposite.push_back(2);
-		//comp = composite2Images(comp, 0, 3);
+
+
+
+								compositeImage = composite2Images(compositeImage, centerimgIndex, imagesInComposite[j], true, temp);
+								imagesInCompositeLevel2.push_back(i);
+								window = "final of " + to_string(imagesInComposite[j]) + " to " + to_string(centerimgIndex);
+								namedWindow(window, WINDOW_NORMAL);
+								resizeWindow(window, 600, 600);
+								imshow(window, compositeImage);
+
+							}
+						}
+
+
+					}
+
+				}
+			}
+		}
+		
+
+
+		
 
 		string window = "Final Composite Image of ";
 		for (int i = 0; i < imagesInComposite.size(); i++) {
-			window += imagesInComposite[i] + ",";
+			window = window + to_string(imagesInComposite[i]) + ",";
 		}
+		window = window + "lv2: ";
+		for (int i = 0; i < imagesInCompositeLevel2.size(); i++) {
+			window = window + to_string(imagesInCompositeLevel2[i]) + ",";
+		}
+
 		namedWindow(window, WINDOW_NORMAL);
 		resizeWindow(window, 600, 600);
-		imshow(window, comp);
+		imshow(window, compositeImage);
 		
 		auto stop = high_resolution_clock::now();
 		auto duration = duration_cast<microseconds>(stop - startStep);
@@ -271,15 +330,19 @@ int main(int argc, char* argv[]) {
 void setFolderPath() {
 	if (FOLDER == 1) {
 		folderPath = "office2";
-		imageMatchingThreshold = 2500;
+		imageMatchingThreshold = 3600;
 	}
 	else if (FOLDER == 2) {
 		folderPath = "WLH";
-		imageMatchingThreshold = 2500;
+		imageMatchingThreshold = 3000;
 	}
 	else if (FOLDER == 3) {
 		folderPath = "StJames";
-		imageMatchingThreshold = 2500;
+		imageMatchingThreshold = 3300;
+	}
+	else if (FOLDER == 4) {
+		folderPath = "Room";
+		imageMatchingThreshold = 3550;
 	}
 	else { cout << "Invalid FOLDER choice"; return; }
 }
@@ -415,14 +478,14 @@ endOfChecks:
 void FindMatches(int img1indx, int img2indx) {
 	Mat& img_1 = imageSet[img1indx].img;
 	Mat& img_2 = imageSet[img2indx].img;
-	const int numOfPointsToGet = 1000; //interestingly this has a minor effect on processign time.... weird
+	
 	double matchScore = 0;
 	//intitate orb detector 
 	vector<KeyPoint> keypoints_1, keypoints_2;
 	Mat descriptors_1, descriptors_2;
 	//Ptr<SIFT> detector = cv::xfeatures2d::SIFT::create;
 	//Ptr<FeatureDetector> detector = ORB::create();
-	Ptr<FeatureDetector> detector = ORB::create(numOfPointsToGet, 1.2, 8, 127, 0, 2, ORB::HARRIS_SCORE, 127, 20);
+	Ptr<FeatureDetector> detector = ORB::create(ORB_POINT_COUNT, 1.2, 8, 127, 0, 2, ORB::HARRIS_SCORE, 127, 20);
 	Ptr<DescriptorExtractor> descriptor = ORB::create();
 	Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
 
@@ -451,7 +514,7 @@ void FindMatches(int img1indx, int img2indx) {
 		matchScore += (1 + dist) * (1 + dist);
 	}
 	//match score is the average of all the distances
-	matchScore = double(double(matchScore) / double(numOfPointsToGet));
+	matchScore = double(double(matchScore) / double(ORB_POINT_COUNT));
 
 
 	printf("-Matches between img %d and %d -\n", img1indx, img2indx);
@@ -473,7 +536,7 @@ void FindMatches(int img1indx, int img2indx) {
 
 	Mat img_goodmatch;
 	//-- Draw results 
-	if (IMAGE_MATCHING_DEBUG) {
+	if (IMAGE_MATCHING_DISPLAY) {
 
 		//drawMatches(img_1, keypoints_1, img_2, keypoints_2, matches, img_match);
 		drawMatches(img_1, keypoints_1, img_2, keypoints_2, good_matches, img_goodmatch);
@@ -488,7 +551,7 @@ void FindMatches(int img1indx, int img2indx) {
 	//estimate affine transfomation 
 	//get points to use 
 	if (IMAGE_MATCHING_DEBUG) {
-		cout << "points used to calc transform" << endl;
+		//cout << "points used to calc transform" << endl;
 	}
 	vector<Point2d> transformPtsImg1;
 	vector<Point2d> transformPtsImg2;
@@ -506,15 +569,17 @@ void FindMatches(int img1indx, int img2indx) {
 	imageSet[img2indx].goodMatches[img1indx] = good_matches;
 	imageSet[img2indx].goodMatchScores[img1indx] = matchScore;
 
-
-	solveTransforms(transformPtsImg1, transformPtsImg2, img1indx, img2indx);
+	//solve transforms if this match is good enough
+	if (matchScore < imageMatchingThreshold + 50) {
+		solveTransforms(transformPtsImg1, transformPtsImg2, img1indx, img2indx);
+	}
 
 }
 
 
 /* --------------- Step 2 ----------------- */
 
-void solveTransforms(vector<Point2d> transformPtsImg1, vector<Point2d> transformPtsImg2, int img1indx, int img2indx) {
+void solveTransforms(vector<Point2d>& transformPtsImg1, vector<Point2d>& transformPtsImg2, int img1indx, int img2indx) {
 	
 	//find the transform
 	Mat homo1 = findHomography(transformPtsImg2, transformPtsImg1, RANSAC, 5.0);
@@ -543,9 +608,10 @@ int findCenterImage() {
 		for (int j = 0; j < imageSet.size(); j++) {
 			sum += imageSet[i].goodMatchScores[j];
 		}
+		sums.push_back(sum);
 	}
 	for (int i = 0; i < imageSet.size(); i++) {
-		if (sums[i] < minindex) {
+		if (sums[i] < sums[minindex]) {
 			minindex = i;
 		}
 	}
@@ -563,10 +629,14 @@ Path generateAssemblyPath() {
 	
 }
 
-Mat composite2Images(Mat& composite, int img1indx, int img2indx) {
+Mat composite2Images(Mat& composite, int img1indx, int img2indx,bool useImageSpecified,Mat& imageSpecified) {
 	//Mat& img_1 = imageSet[img1indx].img;
 	Mat& img_1 = composite;
 	Mat& img_2 = imageSet[img2indx].img;
+	if (useImageSpecified) {
+		img_2 = imageSpecified;
+	}
+	
 	Mat homo = imageSet[img1indx].homographyMatrixes[img2indx];
 
 	//apply transformation to image 
@@ -585,7 +655,7 @@ Mat composite2Images(Mat& composite, int img1indx, int img2indx) {
 	compositeImg = smartAddImg(img_1, warpedImg);
 	//addWeighted(img_1, 0.5, warpedImg, 0.5, 1, compositeImg);
 	//display
-	string window = "composite Img using transform " + to_string(img1indx) + " and " + to_string(img2indx);
+	string window = "composite Img using transform " + to_string(img2indx) + " to " + to_string(img1indx);
 	namedWindow(window, WINDOW_NORMAL);
 	imshow(window, compositeImg);
 	resizeWindow(window, 800, 800);
