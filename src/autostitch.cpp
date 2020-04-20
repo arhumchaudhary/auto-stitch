@@ -1,7 +1,6 @@
-/*	ELEC474 Take Home Exam
-		Auto-Stitch
-	Brent Champion | 20066282
-	Nathaniel Pauze | 20066234
+/*	Auto-Stitch
+	Brent Champion
+	Nathaniel Pauze
 */
 
 #include <iostream>
