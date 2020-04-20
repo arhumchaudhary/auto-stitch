@@ -33,7 +33,7 @@ The composition process uses the image with the highest fitness score to be the 
 ## Results 
 The results of the software on the St. James church can be seen below:
 
-![alt text](https://github.com/bchampp/auto-stitch/images/st-james-result.jpg)
+![alt text](https://github.com/bchampp/auto-stitch/blob/master/images/st-james-result.jpg)
 
 ## Authors
 - [Brent Champion](www.github.com/bchampp)
