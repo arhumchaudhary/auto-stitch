@@ -36,8 +36,8 @@ The results of the software on the St. James church can be seen below:
 ![alt text](https://github.com/bchampp/auto-stitch/blob/master/images/st-james-result.jpg)
 
 ## Authors
-- [Brent Champion](www.github.com/bchampp)
-- [Nathaniel Pauze](www.github.com/natpauze)
+- [Brent Champion](https://github.com/bchampp)
+- [Nathaniel Pauze](https://github.com/natpauze)
 
 ## Usage
 All code that has been provided is as-is. The authors are not responsible for any actions or consequences associated with the use, distribution and/or modification of these files. This project is for personal, educational use only. By using any code contained in these files, you agree to these terms and will not hold the authors responsible for any actions. 
